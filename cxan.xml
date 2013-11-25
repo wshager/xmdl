@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://cxan.org/ns/package" id="xmdl">
+    <abstract>An XQuery module for RESTful models</abstract>
+    <author id="wshager">Wouter Hager</author>
+    <maintainer id="wshager">Wouter Hager</maintainer>
+    <home>http://github.com/wshager/xmdl</home>
+    <category id="libs">Libraries</category>
+    <tag>json</tag>
+    <tag>model</tag>
+    <tag>rql</tag>
+    <tag>xquery</tag>
+</package>
