@@ -5,7 +5,7 @@ An XQuery module for RESTful models
 
 Models are stored by default in /db/data/domain/model
 
-Please note: this module requires https://github.com/wshager/xrql !
+Please note: this module requires https://github.com/wshager/xrql
 
 Test with eXist:
 --------
