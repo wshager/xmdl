@@ -113,7 +113,7 @@ declare function xmdl:request($domain as xs:string,$model as xs:string) {
 	let $method := request:get-method()
 	let $id := request:get-parameter("id","")
 	let $qstr := string(request:get-query-string())
-	return xmdl:request($domain,$model,$id,$method,$accept,$qstr)
+	return xmdl:request($domain,$model,$id[1],$method,$accept,$qstr)
 };
 
 declare function xmdl:request($domain as xs:string,$model as xs:string,$id as xs:string,$method as xs:string,$accept as xs:string,$qstr as xs:string) {
