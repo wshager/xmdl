@@ -118,12 +118,13 @@ declare function xmdl:request($domain as xs:string,$model as xs:string) {
 
 declare function xmdl:request($domain as xs:string,$model as xs:string,$id as xs:string,$method as xs:string,$accept as xs:string,$qstr as xs:string) {
 	let $maxLimit := 100
-	let $store := "/db/" || $domain || "/model/" || $model
-	let $schemastore := "/db/" || $domain || "/model/Class"
-	let $schemauri := $schemastore || "/" || $model || ".xml"
+	let $root := "/db/data/" || $domain || "/model/"
+	let $store :=  $root || $model
+	let $schemastore := $root || "Class"
+	let $schemadoc := $schemastore || "/" || $model || ".xml"
 	let $schema :=
-		if(doc-available($schemauri)) then
-			doc($schemauri)/root
+		if(doc-available($schemadoc)) then
+			doc($schemadoc)/root
 		else
 			()
 	let $maxLimit :=
