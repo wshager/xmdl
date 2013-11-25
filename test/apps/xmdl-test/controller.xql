@@ -73,10 +73,6 @@ if(starts-with($exist:path,"/model")) then
                 <add-parameter name="id" value="{$id}"/>
 			</forward>
 		</dispatch>
-else if(starts-with($exist:path,"/test")) then
-	<dispatch xmlns="http://exist.sourceforge.net/NS/exist">
-		<forward url="{$exist:controller}/modules/test.xql" />
-	</dispatch>
 else
     (: everything else is passed through :)
     <dispatch xmlns="http://exist.sourceforge.net/NS/exist">
