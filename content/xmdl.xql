@@ -99,26 +99,32 @@ declare function xmdl:resolve-links($node as element(), $schema as element(), $s
 };
 
 declare function xmdl:request() {
+	let $dataroot := "/db/data"
+	return xmdl:request($dataroot)
+};
+
+
+declare function xmdl:request($dataroot as xs:string) {
 	let $domain := request:get-server-name()
-	return xmdl:request($domain)
+	return xmdl:request($dataroot,$domain)
 };
 
-declare function xmdl:request($domain) {
+declare function xmdl:request($dataroot as xs:string,$domain as xs:string) {
 	let $model := request:get-parameter("model","")
-	return xmdl:request($domain,$model)
+	return xmdl:request($dataroot,$domain,$model)
 };
 
-declare function xmdl:request($domain as xs:string,$model as xs:string) {
+declare function xmdl:request($dataroot as xs:string,$domain as xs:string,$model as xs:string) {
 	let $accept := request:get-header("Accept")
 	let $method := request:get-method()
 	let $id := request:get-parameter("id","")
 	let $qstr := string(request:get-query-string())
-	return xmdl:request($domain,$model,$id[1],$method,$accept,$qstr)
+	return xmdl:request($dataroot,$domain,$model,$id[1],$method,$accept,$qstr)
 };
 
-declare function xmdl:request($domain as xs:string,$model as xs:string,$id as xs:string,$method as xs:string,$accept as xs:string,$qstr as xs:string) {
+declare function xmdl:request($dataroot as xs:string, $domain as xs:string,$model as xs:string,$id as xs:string,$method as xs:string,$accept as xs:string,$qstr as xs:string) {
 	let $maxLimit := 100
-	let $root := "/db/data/" || $domain || "/model/"
+	let $root := $dataroot || "/" || $domain || "/model/"
 	let $store :=  $root || $model
 	let $schemastore := $root || "Class"
 	let $schemadoc := $schemastore || "/" || $model || ".xml"
