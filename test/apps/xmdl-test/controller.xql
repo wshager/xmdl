@@ -73,6 +73,20 @@ if(starts-with($exist:path,"/model")) then
                 <add-parameter name="id" value="{$id}"/>
 			</forward>
 		</dispatch>
+if(starts-with($exist:path,"/test")) then
+    let $params := subsequence(tokenize($exist:path,"/"), 3)
+    let $model := $params[1]
+    let $params := remove($params,1)
+    let $id := string-join($params,"/")
+    return
+    	<dispatch xmlns="http://exist.sourceforge.net/NS/exist">
+			<forward url="{$exist:controller}/modules/test.xql">
+                {$login("org.exist.login", "/", (), false())}
+                <set-header name="Cache-Control" value="no-cache"/>
+				<add-parameter name="model" value="{$model}"/>
+                <add-parameter name="id" value="{$id}"/>
+			</forward>
+		</dispatch>
 else
     (: everything else is passed through :)
     <dispatch xmlns="http://exist.sourceforge.net/NS/exist">
