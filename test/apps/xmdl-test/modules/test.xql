@@ -119,6 +119,7 @@ declare function local:request($domain as xs:string,$model as xs:string,$id as x
 };
 
 
+let $dataroot := "/db/data"
 let $domain := "xmdl-test"
 let $model := "test"
 let $accept := request:get-header("Accept")
@@ -126,4 +127,4 @@ let $method := request:get-method()
 let $id := request:get-parameter("id","")
 let $qstr := string(request:get-query-string())
 
-return local:request($domain,$model,$id[1],$method,$accept,$qstr)
+return local:request($dataroot,$domain,$model,$id[1],$method,$accept,$qstr)
