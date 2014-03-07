@@ -6,8 +6,6 @@ xquery version "3.0";
 
 module namespace xmdl="http://lagua.nl/lib/xmdl";
 
-declare namespace text="http://exist-db.org/xquery/text";
-declare namespace transform="http://exist-db.org/xquery/transform";
 declare namespace request="http://exist-db.org/xquery/request";
 declare namespace response="http://exist-db.org/xquery/response";
 
@@ -66,43 +64,128 @@ declare function xmdl:check-html($node,$accept) {
 		$node 
 };
 
-declare function xmdl:resolve-links($node as element(), $schema as element(), $store as xs:string) as element() {
-	element root {
-		$node/node(),
-		for $l in $schema/links return
-			let $href := tokenize($l/href,"\?")
-			let $uri := $href[1]
-			let $qstr := $href[2]
-			let $qstr := string-join(
-				for $x in analyze-string($qstr, "\{([^}]*)\}")/* return
-					if(local-name($x) eq "non-match") then
-						$x
+declare function xmdl:resolve-links($node as element(), $schema as element()?, $store as xs:string) as element() {
+	if($schema) then
+		element root {
+			$node/node(),
+			for $l in $schema/links return
+				let $href := tokenize($l/href,"\?")
+				let $uri := $href[1]
+				let $qstr := $href[2]
+				let $qstr := string-join(
+					for $x in analyze-string($qstr, "\{([^}]*)\}")/* return
+						if(local-name($x) eq "non-match") then
+							$x
+						else
+							for $g in $x/fn:group
+								return $node/*[local-name() eq $g]
+				)
+				return
+					if($l/resolution eq "lazy") then
+						element { $l/rel } {
+							element { "_ref" } { $uri || "?" || $qstr }
+						}
 					else
-						for $g in $x/fn:group
-							return $node/*[local-name() eq $g]
-			)
-			return
-				if($l/resolution eq "lazy") then
-					element { $l/rel } {
-						element { "_ref" } { $uri || "?" || $qstr }
-					}
-				else
-					let $q := xrql:parse($qstr,())
-					return element { $l/rel } {
-						for $x in xrql:sequence(collection(resolve-uri($uri,$store || "/"))/root,$q,500,false()) return
-							element {"json:value"} {
-								attribute {"json:array"} {"true"},
-								$x/node()
-							}
-					}
-	}
+						let $q := xrql:parse($qstr,())
+						return element { $l/rel } {
+							for $x in xrql:sequence(collection(resolve-uri($uri,$store || "/"))/root,$q,500,false()) return
+								element {"json:value"} {
+									attribute {"json:array"} {"true"},
+									$x/node()
+								}
+						}
+		}
+	else
+		$node
+};
+
+(: fill in defaults, infer types :)
+(: TODO basic validation :)
+declare function xmdl:from-schema($node as element(), $schema as element()?) {
+    if($schema) then
+        let $props := for $p in $node/* return name($p)
+        let $defaults :=
+            for $p in $schema/properties/* return
+                if(name($p) = $props) then
+                    ()
+                else
+                    if($p/default) then
+                        element { name($p) } {
+                            if($p/type eq "string") then
+                                ()
+                            else
+                                attribute { "json:literal"} { "true" },
+                            if($p/type eq "string" and $p/format eq "date-time" and $p/default eq "now()") then
+                                current-dateTime()
+                            else
+                                $p/default/text()
+                        }
+                    else
+                        ()
+        let $props := for $p in $schema/properties/* return name($p)
+        let $data := for $p in $node/* return
+            if(name($p) = $props) then
+                let $s := $schema/properties/*[name(.) = name($p)]
+                return
+                    if($s/type = "string") then
+                        $p
+                    else
+                        element { name($p) } {
+                            attribute {"json:literal"} { "true" },
+                            $p/text()
+                        }
+            else
+                $p
+        return element { name ($node) } {
+            $data,
+            $defaults
+        }
+    else
+        $node
+};
+
+(: writes increment value to schema :)
+declare function xmdl:get-next-id($schema as element()?,$schemastore as xs:string,$schemaname as xs:string) {
+    if($schema) then
+        let $key := $schema/properties/*[primary and auto_increment]
+        let $id := 
+            if($key) then
+                string($key/auto_increment)
+            else
+                ()
+        let $null :=
+            if($key) then
+                let $schema :=
+                    element root {
+                        $schema/@*,
+                        element properties {
+                            for $p in $schema/properties/* return
+                                if($p=$key) then
+                                    element {name($p)} {
+                                        $p/@*,
+                                        $p/*[name(.) != "auto_increment"],
+                                        element auto_increment {
+                                            $p/auto_increment/@*,
+                                            number($p/auto_increment) + 1
+                                        }
+                                    }
+                                else
+                                    $p
+                        },
+                        $schema/*[name(.) != "properties"]
+                    }
+                return xmldb:store($schemastore,$schemaname,$schema)
+            else
+                ()
+        return $id
+    else
+        ()
 };
 
 declare function xmdl:request() {
 	let $dataroot := "/db/data"
 	return xmdl:request($dataroot)
 };
-
 
 declare function xmdl:request($dataroot as xs:string) {
 	let $domain := request:get-server-name()
@@ -123,11 +206,22 @@ declare function xmdl:request($dataroot as xs:string,$domain as xs:string,$model
 };
 
 declare function xmdl:request($dataroot as xs:string, $domain as xs:string,$model as xs:string,$id as xs:string,$method as xs:string,$accept as xs:string,$qstr as xs:string) {
+	let $data := 
+		if($method = ("PUT","POST")) then
+			util:binary-to-string(request:get-data())
+		else
+			""
+	return xmdl:request($dataroot,$domain,$model,$id,$method,$accept,$qstr,$data)
+};
+
+declare function xmdl:request($dataroot as xs:string, $domain as xs:string,$model as xs:string,$id as xs:string,$method as xs:string,$accept as xs:string,$qstr as xs:string,$data as xs:string) {
 	let $maxLimit := 100
 	let $root := $dataroot || "/" || $domain || "/model/"
 	let $store :=  $root || $model
 	let $schemastore := $root || "Class"
-	let $schemadoc := $schemastore || "/" || $model || ".xml"
+	(: use model as default schema for now :)
+	let $schemaname := $model || ".xml"
+	let $schemadoc := $schemastore || "/" || $schemaname
 	let $schema :=
 		if(doc-available($schemadoc)) then
 			doc($schemadoc)/root
@@ -151,7 +245,6 @@ declare function xmdl:request($dataroot as xs:string, $domain as xs:string,$mode
 		if($model eq "") then
 			response:set-status-code(500)
 		else if($method = ("PUT","POST")) then
-			let $data := util:binary-to-string(request:get-data())
 			let $data := 
 				if($data != "") then
 					$data
@@ -175,7 +268,12 @@ declare function xmdl:request($dataroot as xs:string, $domain as xs:string,$mode
 				else if($id) then
 					$id
 				else
-					util:uuid()
+				    let $next-id := xmdl:get-next-id($schema,$schemastore,$model || ".xml")
+				    return
+	    			    if($next-id) then
+				            $next-id
+				        else
+					        util:uuid()
 			let $xml := 
 				if($did) then
 				   $xml
@@ -187,6 +285,7 @@ declare function xmdl:request($dataroot as xs:string, $domain as xs:string,$mode
 							$id
 						}
 					}
+			let $xml := xmdl:from-schema($xml,$schema)
 			let $doc :=
 				if(exists(collection($store)/root[id = $id])) then
 					base-uri(collection($store)/root[id = $id])
@@ -200,19 +299,29 @@ declare function xmdl:request($dataroot as xs:string, $domain as xs:string,$mode
 					response:set-status-code(500)
 		else if($method="GET") then
 			if($id != "") then
-				xmdl:check-html(collection($store)/root[id = $id],$accept)
+				let $res := xmdl:check-html(collection($store)/root[id = $id],$accept)
+				return
+					if($res) then
+						$res
+					else
+						(element root {
+							"Error: " || $model || "/" || $id || " not found"
+						},
+						response:set-status-code(404))
 			else if($qstr ne "" or request:get-header("range") or sm:is-authenticated()) then
 				let $q := xrql:parse($qstr,())
+				let $res := for $x in xrql:sequence(collection($store)/root,$q,$maxLimit) return
+					xmdl:check-html(element {"json:value"} {
+						attribute {"json:array"} {"true"},
+						xmdl:resolve-links($x,$schema,$store)/node()
+					},$accept)
 				return
-					element {"root"} {
-						for $x in xrql:sequence(collection($store)/root,$q,$maxLimit) return
-							xmdl:check-html(element {"json:value"} {
-								attribute {"json:array"} {"true"},
-								if($schema) then xmdl:resolve-links($x,$schema,$store)/node() else $x/node()
-							},$accept)
-					}
+					if($res) then
+						element root { $res	}
+					else
+						<root json:literal="true">[]</root>
 			else
-				(element {"root"} {
+				(element root {
 					"Error: Guests are not allowed to query the entire collection"
 				},
 				response:set-status-code(403))
