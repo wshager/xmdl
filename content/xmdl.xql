@@ -101,7 +101,7 @@ declare function xmdl:resolve-links($node as element(), $schema as element()?, $
 
 (: fill in defaults, infer types :)
 (: TODO basic validation :)
-declare function xmdl:from-schema($node as element(), $schema as element()?) {
+declare function xmdl:from-schema($node as element()*, $schema as element()?) {
     if($schema) then
         let $props := for $p in $node/* return name($p)
         let $defaults :=
@@ -117,8 +117,10 @@ declare function xmdl:from-schema($node as element(), $schema as element()?) {
                                 attribute { "json:literal"} { "true" },
                             if($p/type eq "string" and $p/format eq "date-time" and $p/default eq "now()") then
                                 current-dateTime()
+                            else if($p/type = ("array","object")) then
+                                $p/default/*
                             else
-                                $p/default/text()
+                            	$p/default/text()
                         }
                     else
                         ()
@@ -127,13 +129,13 @@ declare function xmdl:from-schema($node as element(), $schema as element()?) {
             if(name($p) = $props) then
                 let $s := $schema/properties/*[name(.) = name($p)]
                 return
-                    if($s/type = "string") then
-                        $p
-                    else
+                    if($s/type = ("boolean","number","integer","null")) then
                         element { name($p) } {
                             attribute {"json:literal"} { "true" },
                             $p/text()
                         }
+                    else
+                        $p
             else
                 $p
         return element { name ($node) } {
@@ -215,6 +217,10 @@ declare function xmdl:request($dataroot as xs:string, $domain as xs:string,$mode
 };
 
 declare function xmdl:request($dataroot as xs:string, $domain as xs:string,$model as xs:string,$id as xs:string,$method as xs:string,$accept as xs:string,$qstr as xs:string,$data as xs:string) {
+	xmdl:request($dataroot,$domain,$model,$id,$method,$accept,$qstr,$data,false())
+};
+
+declare function xmdl:request($dataroot as xs:string, $domain as xs:string,$model as xs:string,$id as xs:string,$method as xs:string,$accept as xs:string,$qstr as xs:string,$data as xs:string,$forcexml as xs:boolean) {
 	let $maxLimit := 100
 	let $root := $dataroot || "/" || $domain || "/model/"
 	let $store :=  $root || $model
@@ -232,16 +238,7 @@ declare function xmdl:request($dataroot as xs:string, $domain as xs:string,$mode
 			number($schema/maxCount)
 		else
 			$maxLimit
-	let $null :=
-		if(matches($accept,"application/[json|javascript]")) then
-			util:declare-option("exist:serialize", "method=json media-type=application/json")
-		else if(matches($accept,"[text|application]/xml")) then
-			util:declare-option("exist:serialize", "method=xml media-type=application/xml")
-		else if(matches($accept,"text/html")) then
-			util:declare-option("exist:serialize", "method=html media-type=text/html")
-		else
-			()
-	return
+	let $result :=
 		if($model eq "") then
 			response:set-status-code(500)
 		else if($method = ("PUT","POST")) then
@@ -317,9 +314,9 @@ declare function xmdl:request($dataroot as xs:string, $domain as xs:string,$mode
 					},$accept)
 				return
 					if($res) then
-						element root { $res	}
+						<root xmlns:json="http://www.json.org">{$res}</root>
 					else
-						<root json:literal="true">[]</root>
+						<root xmlns:json="http://www.json.org" json:literal="true">[]</root>
 			else
 				(element root {
 					"Error: Guests are not allowed to query the entire collection"
@@ -337,4 +334,17 @@ declare function xmdl:request($dataroot as xs:string, $domain as xs:string,$mode
 				response:set-status-code(500)
 		else
 			response:set-status-code(500)
+	return
+		if($result and $forcexml = false() and matches($accept,"application/[json|javascript]")) then
+			(
+				(:response:set-header("content-type","application/json"),
+				replace(util:serialize($result,"method=json media-type=application/json"),"&quot;_ref&quot;","&quot;\$ref&quot;"),:)
+				util:declare-option("exist:serialize","method=json media-type=application/json"),
+				$result
+			)
+		else
+			(
+				util:declare-option("exist:serialize", "method=xml media-type=application/xml"),
+				$result
+			)
 };
