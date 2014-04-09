@@ -64,22 +64,25 @@ declare function xmdl:check-html($node,$accept) {
 		$node 
 };
 
+declare function local:replace-vars($str as xs:string, $node as element()) {
+	string-join(
+		for $x in analyze-string($str, "\{([^}]*)\}")/* return
+			if(local-name($x) eq "non-match") then
+				$x
+			else
+				for $g in $x/fn:group
+					return $node/*[local-name() eq $g]
+	)
+};
+
 declare function xmdl:resolve-links($node as element(), $schema as element()?, $store as xs:string) as element() {
 	if($schema) then
 		element root {
 			$node/node(),
 			for $l in $schema/links return
 				let $href := tokenize($l/href,"\?")
-				let $uri := $href[1]
-				let $qstr := $href[2]
-				let $qstr := string-join(
-					for $x in analyze-string($qstr, "\{([^}]*)\}")/* return
-						if(local-name($x) eq "non-match") then
-							$x
-						else
-							for $g in $x/fn:group
-								return $node/*[local-name() eq $g]
-				)
+				let $uri := local:replace-vars($href[1],$node)
+				let $qstr := local:replace-vars($href[2],$node)
 				return
 					if($l/resolution eq "lazy") then
 						element { $l/rel } {
