@@ -65,38 +65,66 @@ declare function xmdl:check-html($node,$accept) {
 };
 
 declare function local:replace-vars($str as xs:string, $node as element()) {
-	string-join(
-		for $x in analyze-string($str, "\{([^}]*)\}")/* return
-			if(local-name($x) eq "non-match") then
-				$x
-			else
-				for $g in $x/fn:group
-					return $node/*[local-name() eq $g]
-	)
+	if($str) then
+		string-join(
+			for $x in analyze-string($str, "\{([^}]*)\}")/* return
+				if(local-name($x) eq "non-match") then
+					$x
+				else
+					for $g in $x/fn:group
+						return $node/*[local-name() eq $g]
+		)
+	else
+		""
 };
 
-declare function xmdl:resolve-links($node as element(), $schema as element()?, $store as xs:string) as element() {
+declare function local:get-model-from-path($path) {
+    let $parts := tokenize($path,"/")
+    let $last := $parts[last()]
+    let $parts := remove($parts,count($parts))
+    return
+        if($last!="") then
+            $last
+        else if(count($parts)>0) then
+            local:get-model-from-path(string-join($parts,"/"))
+        else
+            ()
+};
+
+declare function xmdl:resolve-links($node as element(), $schema as element()?, $store as xs:string, $schemastore as xs:string) as element() {
 	if($schema) then
 		element root {
+			$node/@*,
 			$node/node(),
 			for $l in $schema/links return
 				let $href := tokenize($l/href,"\?")
-				let $uri := local:replace-vars($href[1],$node)
-				let $qstr := local:replace-vars($href[2],$node)
+				let $uri := local:replace-vars(string($href[1]),$node)
+				let $qstr := local:replace-vars(string($href[2]),$node)
 				return
 					if($l/resolution eq "lazy") then
-						element { $l/rel } {
-							element { "_ref" } { $uri || "?" || $qstr }
-						}
-					else
+						let $href := 
+							if($qstr) then
+								$uri || "?" || $qstr
+							else
+								$uri
+						return
+							element { $l/rel } {
+								element { "_ref" } { $href }
+							}
+					else if($l/resolution eq "eager") then
 						let $q := xrql:parse($qstr,())
 						return element { $l/rel } {
-							for $x in xrql:sequence(collection(resolve-uri($uri,$store || "/"))/root,$q,500,false()) return
+							let $href := resolve-uri($uri,$store || "/")
+							let $lmodel := local:get-model-from-path($href)
+							let $lschema := doc($schemastore || "/" || $lmodel || ".xml")/root
+							for $x in xrql:sequence(collection($href)/root,$q,500,false()) return
 								element {"json:value"} {
 									attribute {"json:array"} {"true"},
-									$x/node()
+									xmdl:resolve-links($x,$lschema,$href,$schemastore)/node()
 								}
 						}
+					else
+						()
 		}
 	else
 		$node
@@ -228,14 +256,10 @@ declare function xmdl:request($dataroot as xs:string, $domain as xs:string,$mode
 	let $root := $dataroot || "/" || $domain || "/model/"
 	let $store :=  $root || $model
 	let $schemastore := $root || "Class"
-	(: use model as default schema for now :)
+	(: use Class/[Model] as schema internally :)
 	let $schemaname := $model || ".xml"
 	let $schemadoc := $schemastore || "/" || $schemaname
-	let $schema :=
-		if(doc-available($schemadoc)) then
-			doc($schemadoc)/root
-		else
-			()
+	let $schema := doc($schemadoc)/root
 	let $maxLimit :=
 		if($schema/maxCount) then
 			number($schema/maxCount)
@@ -298,22 +322,23 @@ declare function xmdl:request($dataroot as xs:string, $domain as xs:string,$mode
 				else
 					response:set-status-code(500)
 		else if($method="GET") then
-			if($id != "") then
-				let $res := xmdl:check-html(collection($store)/root[id = $id],$accept)
+			(: if there is a query we should always return an array :)
+			if($qstr = "" and $id != "") then
+				let $node := collection($store)/root[id = $id]
 				return
-					if($res) then
-						$res
+					if($node) then
+						xmdl:check-html(xmdl:resolve-links($node,$schema,$store,$schemastore),$accept)
 					else
 						(element root {
 							"Error: " || $model || "/" || $id || " not found"
 						},
 						response:set-status-code(404))
-			else if($qstr ne "" or request:get-header("range") or sm:is-authenticated()) then
+			else if($qstr != "" or request:get-header("range") or sm:is-authenticated()) then
 				let $q := xrql:parse($qstr,())
-				let $res := for $x in xrql:sequence(collection($store)/root,$q,$maxLimit) return
+				let $res := for $node in xrql:sequence(collection($store)/root,$q,$maxLimit) return
 					xmdl:check-html(element {"json:value"} {
 						attribute {"json:array"} {"true"},
-						xmdl:resolve-links($x,$schema,$store)/node()
+						xmdl:resolve-links($node,$schema,$store,$schemastore)/node()
 					},$accept)
 				return
 					if($res) then
