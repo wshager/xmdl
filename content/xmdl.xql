@@ -215,6 +215,17 @@ declare function xmdl:get-next-id($schema as element()?,$schemastore as xs:strin
         ()
 };
 
+declare function xmdl:remove-links($xml as node(),$schema as node()) {
+	if($schema) then
+		let $links := for $l in $schema/links return string($l/rel)
+		element root {
+			$node/@*,
+			$node/node()[name(.) != $links]
+		}
+	else
+		$node
+};
+
 declare function xmdl:request() {
 	let $dataroot := "/db/data"
 	return xmdl:request($dataroot)
@@ -276,6 +287,7 @@ declare function xmdl:request($dataroot as xs:string, $domain as xs:string,$mode
 					"{}"
 			let $xml := xqjson:parse-json($data)
 			let $xml := xmdl:to-plain-xml($xml)
+			let $xml := xmdl:remove-links($xml,$schema)
 			let $did := $xml/id/text()
 			(: check if id in data:
 			this will take precedence, and actually move a resource 
@@ -318,7 +330,7 @@ declare function xmdl:request($dataroot as xs:string, $domain as xs:string,$mode
 			let $res := xmldb:store($store, $doc, $xml)
 			return
 				if($res) then
-					$xml
+					xmdl:resolve-links($xml,$schema,$store,$schemastore)
 				else
 					response:set-status-code(500)
 		else if($method="GET") then
