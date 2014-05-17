@@ -4,7 +4,7 @@ xquery version "3.0";
  * This module provides model-based querying for XML
  :)
 
-module namespace xmdl="http://lagua.nl/lib/xmdl";
+module namespace mdl="http://lagua.nl/lib/mdl";
 
 declare namespace request="http://exist-db.org/xquery/request";
 declare namespace response="http://exist-db.org/xquery/response";
@@ -12,13 +12,13 @@ declare namespace response="http://exist-db.org/xquery/response";
 import module namespace json="http://www.json.org";
 import module namespace xmldb="http://exist-db.org/xquery/xmldb";
 import module namespace xqjson="http://xqilla.sourceforge.net/lib/xqjson";
-import module namespace xrql="http://lagua.nl/lib/xrql";
+import module namespace rql="http://lagua.nl/lib/rql";
 
 (:
 Transform into xml serializable to json natively by eXist
 :)
 
-declare function xmdl:to-plain-xml($node as element()) as element()* {
+declare function mdl:to-plain-xml($node as element()) as element()* {
 	let $name := string(node-name($node))
 	let $name :=
 		if($name = "json") then
@@ -34,7 +34,7 @@ declare function xmdl:to-plain-xml($node as element()) as element()* {
 					attribute {"json:array"} {"true"},
 						$item/node()
 					}
-					return xmdl:to-plain-xml($item)
+					return mdl:to-plain-xml($item)
 		else
 			element {$name} {
 				if($node/@type = ("number","boolean")) then
@@ -44,13 +44,13 @@ declare function xmdl:to-plain-xml($node as element()) as element()* {
 				$node/@*[matches(name(.),"json:")],
 				for $child in $node/node() return
 					if($child instance of element()) then
-						xmdl:to-plain-xml($child)
+						mdl:to-plain-xml($child)
 					else
 						$child
 			}
 };
 
-declare function xmdl:check-html($node,$accept) {
+declare function mdl:check-html($node,$accept) {
 	if(exists($node) and matches($accept,"application/[json|javascript]")) then
 		element { name($node) } {
 			$node/@*,
@@ -91,7 +91,7 @@ declare function local:get-model-from-path($path) {
             ()
 };
 
-declare function xmdl:resolve-links($node as element(), $schema as element()?, $store as xs:string, $schemastore as xs:string) as element() {
+declare function mdl:resolve-links($node as element(), $schema as element()?, $store as xs:string, $schemastore as xs:string) as element() {
 	if($schema) then
 		element root {
 			$node/@*,
@@ -112,16 +112,23 @@ declare function xmdl:resolve-links($node as element(), $schema as element()?, $
 								element { "_ref" } { $href }
 							}
 					else if($l/resolution eq "eager") then
-						let $q := xrql:parse($qstr,())
+						let $q := rql:parse($qstr,())
 						return element { $l/rel } {
 							let $href := resolve-uri($uri,$store || "/")
 							let $lmodel := local:get-model-from-path($href)
 							let $lschema := doc($schemastore || "/" || $lmodel || ".xml")/root
-							for $x in xrql:sequence(collection($href)/root,$q,500,false()) return
-								element {"json:value"} {
-									attribute {"json:array"} {"true"},
-									xmdl:resolve-links($x,$lschema,$href,$schemastore)/node()
-								}
+							let $data := rql:sequence(collection($href)/root,$q,500,false())
+							return
+								if(count($data)) then
+									for $x in $data return
+										element {"json:value"} {
+											attribute {"json:array"} {"true"},
+											mdl:resolve-links($x,$lschema,$href,$schemastore)/node()
+										}
+								else
+									element {"json:value"} {
+										attribute {"json:array"} {"true"}
+									}
 						}
 					else
 						()
@@ -132,7 +139,7 @@ declare function xmdl:resolve-links($node as element(), $schema as element()?, $
 
 (: fill in defaults, infer types :)
 (: TODO basic validation :)
-declare function xmdl:from-schema($node as element()*, $schema as element()?) {
+declare function mdl:from-schema($node as element()*, $schema as element()?) {
     if($schema) then
         let $props := for $p in $node/* return name($p)
         let $defaults :=
@@ -178,7 +185,7 @@ declare function xmdl:from-schema($node as element()*, $schema as element()?) {
 };
 
 (: writes increment value to schema :)
-declare function xmdl:get-next-id($schema as element()?,$schemastore as xs:string,$schemaname as xs:string) {
+declare function mdl:get-next-id($schema as element()?,$schemastore as xs:string,$schemaname as xs:string) {
     if($schema) then
         let $key := $schema/properties/*[primary and auto_increment]
         let $id := 
@@ -215,54 +222,59 @@ declare function xmdl:get-next-id($schema as element()?,$schemastore as xs:strin
         ()
 };
 
-declare function xmdl:remove-links($xml as node(),$schema as node()) {
+declare function mdl:remove-links($node as node(),$schema as node()) {
 	if($schema) then
 		let $links := for $l in $schema/links return string($l/rel)
-		element root {
-			$node/@*,
-			$node/node()[name(.) != $links]
-		}
+		return
+			element root {
+				$node/@*,
+				for $x in $node/node() return
+				    if(name($x) = $links) then
+				        ()
+				    else
+				        $x
+			}
 	else
 		$node
 };
 
-declare function xmdl:request() {
+declare function mdl:request() {
 	let $dataroot := "/db/data"
-	return xmdl:request($dataroot)
+	return mdl:request($dataroot)
 };
 
-declare function xmdl:request($dataroot as xs:string) {
+declare function mdl:request($dataroot as xs:string) {
 	let $domain := request:get-server-name()
-	return xmdl:request($dataroot,$domain)
+	return mdl:request($dataroot,$domain)
 };
 
-declare function xmdl:request($dataroot as xs:string,$domain as xs:string) {
+declare function mdl:request($dataroot as xs:string,$domain as xs:string) {
 	let $model := request:get-parameter("model","")
-	return xmdl:request($dataroot,$domain,$model)
+	return mdl:request($dataroot,$domain,$model)
 };
 
-declare function xmdl:request($dataroot as xs:string,$domain as xs:string,$model as xs:string) {
+declare function mdl:request($dataroot as xs:string,$domain as xs:string,$model as xs:string) {
 	let $accept := request:get-header("Accept")
 	let $method := request:get-method()
 	let $id := request:get-parameter("id","")
 	let $qstr := string(request:get-query-string())
-	return xmdl:request($dataroot,$domain,$model,$id[1],$method,$accept,$qstr)
+	return mdl:request($dataroot,$domain,$model,$id[1],$method,$accept,$qstr)
 };
 
-declare function xmdl:request($dataroot as xs:string, $domain as xs:string,$model as xs:string,$id as xs:string,$method as xs:string,$accept as xs:string,$qstr as xs:string) {
+declare function mdl:request($dataroot as xs:string, $domain as xs:string,$model as xs:string,$id as xs:string,$method as xs:string,$accept as xs:string,$qstr as xs:string) {
 	let $data := 
 		if($method = ("PUT","POST")) then
 			util:binary-to-string(request:get-data())
 		else
 			""
-	return xmdl:request($dataroot,$domain,$model,$id,$method,$accept,$qstr,$data)
+	return mdl:request($dataroot,$domain,$model,$id,$method,$accept,$qstr,$data)
 };
 
-declare function xmdl:request($dataroot as xs:string, $domain as xs:string,$model as xs:string,$id as xs:string,$method as xs:string,$accept as xs:string,$qstr as xs:string,$data as xs:string) {
-	xmdl:request($dataroot,$domain,$model,$id,$method,$accept,$qstr,$data,false())
+declare function mdl:request($dataroot as xs:string, $domain as xs:string,$model as xs:string,$id as xs:string,$method as xs:string,$accept as xs:string,$qstr as xs:string,$data as xs:string) {
+	mdl:request($dataroot,$domain,$model,$id,$method,$accept,$qstr,$data,false())
 };
 
-declare function xmdl:request($dataroot as xs:string, $domain as xs:string,$model as xs:string,$id as xs:string,$method as xs:string,$accept as xs:string,$qstr as xs:string,$data as xs:string,$forcexml as xs:boolean) {
+declare function mdl:request($dataroot as xs:string, $domain as xs:string,$model as xs:string,$id as xs:string,$method as xs:string,$accept as xs:string,$qstr as xs:string,$data as xs:string,$forcexml as xs:boolean) {
 	let $maxLimit := 100
 	let $root := $dataroot || "/" || $domain || "/model/"
 	let $store :=  $root || $model
@@ -286,8 +298,8 @@ declare function xmdl:request($dataroot as xs:string, $domain as xs:string,$mode
 				else
 					"{}"
 			let $xml := xqjson:parse-json($data)
-			let $xml := xmdl:to-plain-xml($xml)
-			let $xml := xmdl:remove-links($xml,$schema)
+			let $xml := mdl:to-plain-xml($xml)
+			let $xml := mdl:remove-links($xml,$schema)
 			let $did := $xml/id/text()
 			(: check if id in data:
 			this will take precedence, and actually move a resource 
@@ -304,7 +316,7 @@ declare function xmdl:request($dataroot as xs:string, $domain as xs:string,$mode
 				else if($id) then
 					$id
 				else
-				    let $next-id := xmdl:get-next-id($schema,$schemastore,$model || ".xml")
+				    let $next-id := mdl:get-next-id($schema,$schemastore,$model || ".xml")
 				    return
 	    			    if($next-id) then
 				            $next-id
@@ -321,7 +333,7 @@ declare function xmdl:request($dataroot as xs:string, $domain as xs:string,$mode
 							$id
 						}
 					}
-			let $xml := xmdl:from-schema($xml,$schema)
+			let $xml := mdl:from-schema($xml,$schema)
 			let $doc :=
 				if(exists(collection($store)/root[id = $id])) then
 					base-uri(collection($store)/root[id = $id])
@@ -330,7 +342,7 @@ declare function xmdl:request($dataroot as xs:string, $domain as xs:string,$mode
 			let $res := xmldb:store($store, $doc, $xml)
 			return
 				if($res) then
-					xmdl:resolve-links($xml,$schema,$store,$schemastore)
+					mdl:resolve-links($xml,$schema,$store,$schemastore)
 				else
 					response:set-status-code(500)
 		else if($method="GET") then
@@ -339,24 +351,34 @@ declare function xmdl:request($dataroot as xs:string, $domain as xs:string,$mode
 				let $node := collection($store)/root[id = $id]
 				return
 					if($node) then
-						xmdl:check-html(xmdl:resolve-links($node,$schema,$store,$schemastore),$accept)
+						mdl:check-html(mdl:resolve-links($node,$schema,$store,$schemastore),$accept)
 					else
 						(element root {
 							"Error: " || $model || "/" || $id || " not found"
 						},
 						response:set-status-code(404))
 			else if($qstr != "" or request:get-header("range") or sm:is-authenticated()) then
-				let $q := xrql:parse($qstr,())
-				let $res := for $node in xrql:sequence(collection($store)/root,$q,$maxLimit) return
-					xmdl:check-html(element {"json:value"} {
-						attribute {"json:array"} {"true"},
-						xmdl:resolve-links($node,$schema,$store,$schemastore)/node()
-					},$accept)
-				return
-					if($res) then
-						<root xmlns:json="http://www.json.org">{$res}</root>
+				let $q := rql:parse($qstr,())
+				let $q2 := rql:to-xq($q/args)
+				let $res := rql:apply-xq(collection($store)/root,$q2,$maxLimit)
+				let $res := 
+					if($q2/special/args) then
+						$res
 					else
-						<root xmlns:json="http://www.json.org" json:literal="true">[]</root>
+						for $node in $res return
+							mdl:check-html(element {"json:value"} {
+								attribute {"json:array"} {"true"},
+								mdl:resolve-links($node,$schema,$store,$schemastore)/node()
+							},$accept)
+				let $res := 
+					if($res) then
+						$res
+					else
+						element {"json:value"} {
+							attribute {"json:array"} {"true"}
+						}
+				return
+					<root xmlns:json="http://www.json.org">{$res}</root>
 			else
 				(element root {
 					"Error: Guests are not allowed to query the entire collection"

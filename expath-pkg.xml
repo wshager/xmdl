@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<package xmlns="http://expath.org/ns/pkg" name="http://lagua.nl/pkg/xmdl" abbrev="xmdl" version="0.1" spec="1.0">
+<package xmlns="http://expath.org/ns/pkg" name="http://lagua.nl/pkg/mdl" abbrev="mdl" version="0.1" spec="1.0">
     <title>XMDL: RESTful models</title>
     <xquery>
-        <namespace>http://lagua.nl/lib/xmdl</namespace>
-        <file>xmdl.xql</file>
+        <namespace>http://lagua.nl/lib/mdl</namespace>
+        <file>mdl.xql</file>
     </xquery>
 </package>
