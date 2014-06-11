@@ -239,42 +239,47 @@ declare function mdl:remove-links($node as node(),$schema as node()) {
 };
 
 declare function mdl:request() {
-	let $dataroot := "/db/data"
-	return mdl:request($dataroot)
+	mdl:request("/db/data")
 };
 
 declare function mdl:request($dataroot as xs:string) {
-	let $domain := request:get-server-name()
-	return mdl:request($dataroot,$domain)
+	mdl:request($dataroot,request:get-server-name())
 };
 
 declare function mdl:request($dataroot as xs:string,$domain as xs:string) {
-	let $model := request:get-parameter("model","")
-	return mdl:request($dataroot,$domain,$model)
+	mdl:request($dataroot,$domain,request:get-parameter("model",""))
 };
 
 declare function mdl:request($dataroot as xs:string,$domain as xs:string,$model as xs:string) {
-	let $accept := request:get-header("Accept")
-	let $method := request:get-method()
-	let $id := request:get-parameter("id","")
-	let $qstr := string(request:get-query-string())
-	return mdl:request($dataroot,$domain,$model,$id[1],$method,$accept,$qstr)
+	mdl:request($dataroot,$domain,$model,request:get-parameter("id","")[1])
 };
 
-declare function mdl:request($dataroot as xs:string, $domain as xs:string,$model as xs:string,$id as xs:string,$method as xs:string,$accept as xs:string,$qstr as xs:string) {
+declare function mdl:request($dataroot as xs:string,$domain as xs:string,$model as xs:string,$id as xs:string) {
+	mdl:request($dataroot,$domain,$model,$id,string(request:get-query-string()))
+};
+
+declare function mdl:request($dataroot as xs:string,$domain as xs:string,$model as xs:string,$id as xs:string,$qstr as xs:string) {
+	mdl:request($dataroot,$domain,$model,$id,$qstr,request:get-method())
+};
+
+declare function mdl:request($dataroot as xs:string,$domain as xs:string,$model as xs:string,$id as xs:string,$qstr as xs:string,$method as xs:string) {
+	mdl:request($dataroot,$domain,$model,$id,$qstr,$method,request:get-header("Accept"))
+};
+
+declare function mdl:request($dataroot as xs:string, $domain as xs:string,$model as xs:string,$id as xs:string,$qstr as xs:string,$method as xs:string,$accept as xs:string) {
 	let $data := 
 		if($method = ("PUT","POST")) then
 			util:binary-to-string(request:get-data())
 		else
 			""
-	return mdl:request($dataroot,$domain,$model,$id,$method,$accept,$qstr,$data)
+	return mdl:request($dataroot,$domain,$model,$id,$qstr,$method,$accept,$data)
 };
 
-declare function mdl:request($dataroot as xs:string, $domain as xs:string,$model as xs:string,$id as xs:string,$method as xs:string,$accept as xs:string,$qstr as xs:string,$data as xs:string) {
-	mdl:request($dataroot,$domain,$model,$id,$method,$accept,$qstr,$data,false())
+declare function mdl:request($dataroot as xs:string, $domain as xs:string,$model as xs:string,$id as xs:string,$qstr as xs:string,$method as xs:string,$accept as xs:string,$data as xs:string) {
+	mdl:request($dataroot,$domain,$model,$id,$qstr,$method,$accept,$data,false())
 };
 
-declare function mdl:request($dataroot as xs:string, $domain as xs:string,$model as xs:string,$id as xs:string,$method as xs:string,$accept as xs:string,$qstr as xs:string,$data as xs:string,$forcexml as xs:boolean) {
+declare function mdl:request($dataroot as xs:string, $domain as xs:string,$model as xs:string,$id as xs:string,$qstr as xs:string,$method as xs:string,$accept as xs:string,$data as xs:string,$forcexml as xs:boolean) {
 	let $maxLimit := 100
 	let $root := $dataroot || "/" || $domain || "/model/"
 	let $store :=  $root || $model
