@@ -8,6 +8,7 @@ module namespace mdl="http://lagua.nl/lib/mdl";
 
 declare namespace request="http://exist-db.org/xquery/request";
 declare namespace response="http://exist-db.org/xquery/response";
+declare namespace sm="http://exist-db.org/xquery/securitymanager";
 
 import module namespace json="http://www.json.org";
 import module namespace xmldb="http://exist-db.org/xquery/xmldb";
@@ -222,7 +223,7 @@ declare function mdl:get-next-id($schema as element()?,$schemastore as xs:string
         ()
 };
 
-declare function mdl:remove-links($node as node(),$schema as node()) {
+declare function mdl:remove-links($node as element(),$schema as element()?) {
 	if($schema) then
 		let $links := for $l in $schema/links return string($l/rel)
 		return
@@ -357,7 +358,7 @@ declare function mdl:request($dataroot as xs:string, $domain as xs:string,$model
 		else if($method="GET") then
 			(: if there is a query we should always return an array :)
 			if($qstr = "" and $id != "") then
-				let $node := collection($store)/root[id = $id]
+				let $node := doc($store || "/" || $id || ".xml")/root
 				return
 					if($node) then
 						mdl:check-html(mdl:resolve-links($node,$schema,$store,$schemastore),$accept)
@@ -395,12 +396,8 @@ declare function mdl:request($dataroot as xs:string, $domain as xs:string,$model
 				response:set-status-code(403))
 		else if($method="DELETE") then
 			if($id != "") then
-				let $path := base-uri(collection($store)/root[id = $id])
-				let $parts := tokenize($path,"/")
-				let $doc := $parts[last()]
-				let $parts := remove($parts,last())
-				let $path  := string-join($parts,"/")
-				return xmldb:remove($path, $doc)
+				let $doc := $id || ".xml"
+				return xmldb:remove($store, $doc)
 			else
 				response:set-status-code(500)
 		else
