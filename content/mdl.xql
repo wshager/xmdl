@@ -244,7 +244,13 @@ declare function mdl:request() {
 };
 
 declare function mdl:request($dataroot as xs:string) {
-	mdl:request($dataroot,request:get-server-name())
+	let $domain := request:get-header("content-domain")
+	let $domain := 
+		if($domain) then
+			$domain
+		else
+			request:get-server-name()
+	return mdl:request($dataroot,$domain)
 };
 
 declare function mdl:request($dataroot as xs:string,$domain as xs:string) {
