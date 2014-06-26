@@ -287,7 +287,11 @@ declare function mdl:request($dataroot as xs:string, $domain as xs:string,$model
 	(: use Class/[Model] as schema internally :)
 	let $schemaname := $model || ".xml"
 	let $schemadoc := $schemastore || "/" || $schemaname
-	let $schema := doc($schemadoc)/root
+	let $schema := 
+		if(doc-available($schemadoc)) then
+			doc($schemadoc)/root
+		else
+			()
 	let $maxLimit :=
 		if($schema/maxCount) then
 			number($schema/maxCount)
