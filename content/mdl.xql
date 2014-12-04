@@ -94,7 +94,7 @@ declare function local:get-model-from-path($path) {
 
 declare function mdl:resolve-links($node as element(), $schema as element()?, $store as xs:string, $schemastore as xs:string) as element() {
 	if($schema) then
-		element root {
+		element { name($node) } {
 			$node/@*,
 			$node/node(),
 			for $l in $schema/links return
