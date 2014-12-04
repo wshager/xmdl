@@ -96,7 +96,7 @@ declare function mdl:resolve-links($node as element(), $schema as element()?, $s
 	if($schema) then
 		element { name($node) } {
 			$node/@*,
-			$node/node(),
+			$node/*[not(name() = $schema/links/rel/text())],
 			for $l in $schema/links return
 				let $href := tokenize($l/href,"\?")
 				let $uri := local:replace-vars(string($href[1]),$node)
