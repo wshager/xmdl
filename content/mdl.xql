@@ -80,16 +80,16 @@ declare function local:replace-vars($str as xs:string, $node as element()) {
 };
 
 declare function local:get-model-from-path($path) {
-    let $parts := tokenize($path,"/")
-    let $last := $parts[last()]
-    let $parts := remove($parts,count($parts))
-    return
-        if($last!="") then
-            $last
-        else if(count($parts)>0) then
-            local:get-model-from-path(string-join($parts,"/"))
-        else
-            ()
+	let $parts := tokenize($path,"/")
+	let $last := $parts[last()]
+	let $parts := remove($parts,count($parts))
+	return
+		if($last!="") then
+			$last
+		else if(count($parts)>0) then
+			local:get-model-from-path(string-join($parts,"/"))
+		else
+			()
 };
 
 declare function mdl:resolve-links($node as element(), $schema as element()?, $store as xs:string, $schemastore as xs:string) as element() {
@@ -141,102 +141,129 @@ declare function mdl:resolve-links($node as element(), $schema as element()?, $s
 (: fill in defaults, infer types :)
 (: TODO basic validation :)
 declare function mdl:from-schema($node as element()*, $schema as element()?) {
-    if($schema) then
-        let $props := for $p in $node/* return name($p)
-        let $defaults :=
-            for $p in $schema/properties/* return
-                if(name($p) = $props) then
-                    ()
-                else
-                    if($p/default) then
-                        element { name($p) } {
-                            if($p/type eq "string") then
-                                ()
-                            else
-                                attribute { "json:literal"} { "true" },
-                            if($p/type eq "string" and $p/format eq "date-time" and $p/default eq "now()") then
-                                current-dateTime()
-                            else if($p/type = ("array","object")) then
-                                $p/default/*
-                            else
-                            	$p/default/text()
-                        }
-                    else
-                        ()
-        let $props := for $p in $schema/properties/* return name($p)
-        let $data := for $p in $node/* return
-            if(name($p) = $props) then
-                let $s := $schema/properties/*[name(.) = name($p)]
-                return
-                    if($s/type = ("boolean","number","integer","null")) then
-                        element { name($p) } {
-                            attribute {"json:literal"} { "true" },
-                            $p/text()
-                        }
-                    else
-                        $p
-            else
-                $p
-        return element { name ($node) } {
-            $data,
-            $defaults
-        }
-    else
-        $node
+	if($schema) then
+		let $props := for $p in $node/* return name($p)
+		let $defaults :=
+			for $p in $schema/properties/* return
+				if(name($p) = $props) then
+					()
+				else
+					if($p/default) then
+						element { name($p) } {
+							if($p/type eq "string") then
+								()
+							else
+								attribute { "json:literal"} { "true" },
+							if($p/type eq "string" and $p/format eq "date-time" and $p/default eq "now()") then
+								current-dateTime()
+							else if($p/type = ("array","object")) then
+								$p/default/*
+							else
+								$p/default/text()
+						}
+					else
+						()
+		let $props := for $p in $schema/properties/* return name($p)
+		let $data := for $p in $node/* return
+			if(name($p) = $props) then
+				let $s := $schema/properties/*[name(.) = name($p)]
+				return
+					if($s/type = ("boolean","number","integer","null")) then
+						element { name($p) } {
+							attribute {"json:literal"} { "true" },
+							$p/text()
+						}
+					else
+						$p
+			else
+				$p
+		return element { name ($node) } {
+			$data,
+			$defaults
+		}
+	else
+		$node
 };
 
 (: writes increment value to schema :)
 declare function mdl:get-next-id($schema as element()?,$schemastore as xs:string,$schemaname as xs:string) {
-    if($schema) then
-        let $key := $schema/properties/*[primary and auto_increment]
-        let $id := 
-            if($key) then
-                string($key/auto_increment)
-            else
-                ()
-        let $null :=
-            if($key) then
-                let $schema :=
-                    element root {
-                        $schema/@*,
-                        element properties {
-                            for $p in $schema/properties/* return
-                                if($p=$key) then
-                                    element {name($p)} {
-                                        $p/@*,
-                                        $p/*[name(.) != "auto_increment"],
-                                        element auto_increment {
-                                            $p/auto_increment/@*,
-                                            number($p/auto_increment) + 1
-                                        }
-                                    }
-                                else
-                                    $p
-                        },
-                        $schema/*[name(.) != "properties"]
-                    }
-                return xmldb:store($schemastore,$schemaname,$schema)
-            else
-                ()
-        return $id
-    else
-        ()
+	if($schema) then
+		let $key := $schema/properties/*[primary and auto_increment]
+		let $id := 
+			if($key) then
+				string($key/auto_increment)
+			else
+				()
+		let $null :=
+			if($key) then
+				let $schema :=
+					element root {
+						$schema/@*,
+						element properties {
+							for $p in $schema/properties/* return
+								if($p=$key) then
+									element {name($p)} {
+										$p/@*,
+										$p/*[name(.) != "auto_increment"],
+										element auto_increment {
+											$p/auto_increment/@*,
+											number($p/auto_increment) + 1
+										}
+									}
+								else
+									$p
+						},
+						$schema/*[name(.) != "properties"]
+					}
+				return xmldb:store($schemastore,$schemaname,$schema)
+			else
+				()
+		return $id
+	else
+		()
 };
 
 declare function mdl:remove-links($node as element(),$schema as element()?) {
 	if($schema) then
 		let $links := for $l in $schema/links return string($l/rel)
 		return
-			element root {
+			element { name($node) } {
 				$node/@*,
 				for $x in $node/node() return
-				    if(name($x) = $links) then
-				        ()
-				    else
-				        $x
+					if(name($x) = $links) then
+						()
+					else
+						$x
 			}
 	else
 		$node
+};
+
+declare variable mdl:describe := map {
+	"writable" := function($node, $uri) {
+		element _writable {
+			attribute json:literal { "true" },
+			sm:has-access($uri, "w")
+		}
+	}
+};
+
+declare function mdl:add-metadata($node as element(),$store as xs:string) {
+	let $describe := tokenize(request:get-header("describe"),"\s*,\s*")
+	let $uri := xs:anyURI($store || "/" || $node/id || ".xml")
+	return
+		if(doc-available($uri)) then
+			element { name($node) } {
+					$node/@*,
+					$node/*,
+					for $meta in $describe return
+						if(map:contains($mdl:describe,$describe)) then
+							map:get($mdl:describe,$describe)($node,$uri)
+						else
+							()
+				}
+		else
+			$node
 };
 
 declare function mdl:request() {
@@ -332,12 +359,12 @@ declare function mdl:request($dataroot as xs:string, $domain as xs:string,$model
 				else if($id) then
 					$id
 				else
-				    let $next-id := mdl:get-next-id($schema,$schemastore,$model || ".xml")
-				    return
-	    			    if($next-id) then
-				            $next-id
-				        else
-					        util:uuid()
+					let $next-id := mdl:get-next-id($schema,$schemastore,$model || ".xml")
+					return
+						if($next-id) then
+							$next-id
+						else
+							util:uuid()
 			let $xml := 
 				if($did) then
 				   $xml
@@ -362,17 +389,18 @@ declare function mdl:request($dataroot as xs:string, $domain as xs:string,$model
 				else
 					response:set-status-code(500)
 		else if($method="GET") then
-			(: if there is a query we should always return an array :)
+			(: if there no query AND an id we should always return the doc :)
 			if($qstr = "" and $id != "") then
 				let $node := doc($store || "/" || $id || ".xml")/root
 				return
 					if($node) then
-						mdl:check-html(mdl:resolve-links($node,$schema,$store,$schemastore),$accept)
+						mdl:check-html(mdl:resolve-links(mdl:add-metadata($node,$store),$schema,$store,$schemastore),$accept)
 					else
 						(element root {
 							"Error: " || $model || "/" || $id || " not found"
 						},
 						response:set-status-code(404))
+			(: if there is a query we should always return an array :)
 			else if($qstr != "" or request:get-header("range") or sm:is-authenticated()) then
 				let $q := rql:parse($qstr,())
 				let $q2 := rql:to-xq($q/args)
@@ -384,7 +412,7 @@ declare function mdl:request($dataroot as xs:string, $domain as xs:string,$model
 						for $node in $res return
 							mdl:check-html(element {"json:value"} {
 								attribute {"json:array"} {"true"},
-								mdl:resolve-links($node,$schema,$store,$schemastore)/node()
+								mdl:resolve-links(mdl:add-metadata($node,$store),$schema,$store,$schemastore)/node()
 							},$accept)
 				let $res := 
 					if($res) then
