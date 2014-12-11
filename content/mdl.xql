@@ -324,10 +324,11 @@ declare function mdl:request($dataroot as xs:string, $domain as xs:string,$model
 };
 
 declare function mdl:request($dataroot as xs:string, $domain as xs:string,$model as xs:string,$id as xs:string,$qstr as xs:string,$method as xs:string,$accept as xs:string,$data as xs:string,$forcexml as xs:boolean) {
-	mdl:request($dataroot,$domain,$model,$id,$qstr,$method,$accept,$data,false(),request:get-header("describe"))
+	let $describe := string(request:get-header("describe"))
+	return mdl:request($dataroot,$domain,$model,$id,$qstr,$method,$accept,$data,$forcexml,$describe)
 };
 
-declare function mdl:request($dataroot as xs:string, $domain as xs:string,$model as xs:string,$id as xs:string,$qstr as xs:string,$method as xs:string,$accept as xs:string,$data as xs:string,$forcexml as xs:boolean,$describe as xs:string) {
+declare function mdl:request($dataroot as xs:string,$domain as xs:string,$model as xs:string,$id as xs:string,$qstr as xs:string,$method as xs:string,$accept as xs:string,$data as xs:string,$forcexml as xs:boolean,$describe as xs:string) {
 	let $maxLimit := 100
 	let $root := $dataroot || "/" || $domain || "/model/"
 	let $store :=  $root || $model
@@ -343,6 +344,11 @@ declare function mdl:request($dataroot as xs:string, $domain as xs:string,$model
 		if($model eq "") then
 			response:set-status-code(500)
 		else if($method = ("PUT","POST")) then
+			let $null := 
+			    if(xmldb:collection-available($store)) then
+			        ()
+			    else
+			        xmldb:create-collection($root, $model)
 			let $data := 
 				if($data != "") then
 					$data
