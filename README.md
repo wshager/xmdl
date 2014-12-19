@@ -1,4 +1,4 @@
-xmdl
+mdl
 ====
 
 An XQuery module for RESTful models
