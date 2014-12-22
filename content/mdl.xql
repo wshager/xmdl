@@ -330,15 +330,15 @@ declare function mdl:query($collection as xs:string, $query as map, $directives 
 			let $q := rql:parse($qstr,())
 			let $xq := rql:to-xq($q)
 			(: filter :)
-			let $items := rql:xq-filter($items,$xq/filter,$xq/special)
+			let $items := rql:xq-filter($items,$xq("filter"),$xq("aggregate"))
 			return
-				if($xq/special) then
-					(: special doesn't return sequence :)
+				if($xq("aggregate")) then
+					(: aggregate doesn't return sequence :)
 					$items
 				else if($items) then
 					let $limit := 
-						if($xq/limit) then
-							$xq/limit
+						if($xq("limit")) then
+							$xq("limit")
 						else if($range) then
 							rql:get-limit-from-range($range,$maxLimit)
 						else
