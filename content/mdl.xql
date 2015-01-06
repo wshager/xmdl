@@ -305,10 +305,7 @@ declare function mld:get($collection as xs:string, $id as xs:string, $directives
 		if($node) then
 			mdl:check-html(mdl:resolve-links(mdl:add-metadata($node,$collection,$describe),$schema,$collection,$schemastore),$accept)
 		else
-			(element root {
-				"Error: " || $model || "/" || $id || " not found"
-			},
-			response:set-status-code(404))
+			<http:response status="404" msg="Error: " || $model || "/" || $id || " not found"/>
 };
 
 declare function mdl:query($collection as xs:string, $query as map, $directives as map) {
@@ -426,14 +423,14 @@ declare function mdl:put($collection, $data, $directives) {
 		if($res) then
 			mdl:resolve-links($xml,$schema,$store,$schemastore)
 		else
-			response:set-status-code(500)
+			<http:response status="500" msg="Unkown Error occurred"/>
 };
 
 declare function mdl:delete($collection,$id,$directives) {
 	if($id) then
 		xmldb:remove($store, $id || ".xml")
 	else
-		response:set-status-code(500)
+		<http:response status="500" msg="Unkown Error occurred"/>
 }; 
 
 declare function mdl:request($dataroot as xs:string,$domain as xs:string,$model as xs:string,$id as xs:string,$qstr as xs:string,$method as xs:string,$accept as xs:string,$data as xs:string,$forcexml as xs:boolean,$describe as xs:string) {
@@ -442,9 +439,9 @@ declare function mdl:request($dataroot as xs:string,$domain as xs:string,$model 
 	let $schemastore := $root || "Class"
 	(: use Class/[Model] as schema internally :)
 	let $schema := mdl:get-schema($schemastore, $model)
-	let $result :=
+	let $response :=
 		if($model eq "") then
-			response:set-status-code(500)
+			<http:response status="500" msg="Unkown Error occurred"/>
 		else if($method = ("PUT","POST")) then
 			let $data := 
 				if($data != "") then
@@ -462,16 +459,32 @@ declare function mdl:request($dataroot as xs:string,$domain as xs:string,$model 
 		else if($method="DELETE") then
 			mdl:delete($store,$id,$directives)
 		else
-			response:set-status-code(503)
-	return
+			<http:response status="503" msg="Unkown Error occurred"/>
+	let $output := 
 		if($result and $forcexml = false() and matches($accept,"application/[json|javascript]")) then
-			(
-				util:declare-option("exist:serialize","method=json media-type=application/json"),
-				$result
-			)
+			util:declare-option("exist:serialize","method=json media-type=application/json")
 		else
-			(
-				util:declare-option("exist:serialize", "method=xml media-type=application/xml"),
-				$result
-			)
+			util:declare-option("exist:serialize", "method=xml media-type=application/xml")
+	return
+		if(name($response[1]) = "http:response") then
+			(: expect custom response :)
+			let $http-response := $response[1]
+			let $result := remove($response,1)
+			return
+				(: parse http:response entry :)
+				if($http-response/@status) then
+					response:set-status-code($http-response/@status)
+				else
+					(),
+				for $header in $http-response/http:header return 
+					response:set-header($header/@name,$header/@value),
+				if($result) then
+					$result
+				else
+					element response {
+						$http-response/@message/string(),
+						$http-response/message/string()
+					}
+		else
+			$response
 };
