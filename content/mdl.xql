@@ -13,7 +13,7 @@ declare namespace sm="http://exist-db.org/xquery/securitymanager";
 import module namespace json="http://www.json.org";
 import module namespace xmldb="http://exist-db.org/xquery/xmldb";
 import module namespace xqjson="http://xqilla.sourceforge.net/lib/xqjson";
-import module namespace rql="http://lagua.nl/lib/rql";
+import module namespace rql="http://lagua.nl/lib/rql" at "rql.xql";
 
 declare variable $mdl:maxLimit := 100;
 
@@ -286,20 +286,20 @@ declare function mdl:request($dataroot as xs:string, $domain as xs:string,$model
 				else
 					<root/>
 		else
-			""
+			<root/>
 	return mdl:request($dataroot,$domain,$model,$id,$query-string,$method,$accept,$data)
 };
 
-declare function mdl:request($dataroot as xs:string, $domain as xs:string,$model as xs:string,$id as xs:string,$query-string as xs:string,$method as xs:string,$accept as xs:string,$data as xs:string) {
+declare function mdl:request($dataroot as xs:string, $domain as xs:string,$model as xs:string,$id as xs:string,$query-string as xs:string,$method as xs:string,$accept as xs:string,$data as node()) {
 	mdl:request($dataroot,$domain,$model,$id,$query-string,$method,$accept,$data,false())
 };
 
-declare function mdl:request($dataroot as xs:string, $domain as xs:string,$model as xs:string,$id as xs:string,$query-string as xs:string,$method as xs:string,$accept as xs:string,$data as xs:string,$forcexml as xs:boolean) {
+declare function mdl:request($dataroot as xs:string, $domain as xs:string,$model as xs:string,$id as xs:string,$query-string as xs:string,$method as xs:string,$accept as xs:string,$data as node(),$forcexml as xs:boolean) {
 	let $describe := string(request:get-header("describe"))
 	return mdl:request($dataroot,$domain,$model,$id,$query-string,$method,$accept,$data,$forcexml,$describe)
 };
 
-declare function mld:get($collection as xs:string, $id as xs:string, $directives as map) {
+declare function mdl:get($collection as xs:string, $id as xs:string, $directives as map) {
 	let $node := doc($collection || "/" || $id || ".xml")/root
 	let $describe := $directives("describe")
 	let $accept := $directives("accept")
@@ -310,7 +310,7 @@ declare function mld:get($collection as xs:string, $id as xs:string, $directives
 		if($node) then
 			mdl:check-html(mdl:resolve-links(mdl:add-metadata($node,$collection,$describe),$schema,$collection,$schemastore),$accept)
 		else
-			<http:response status="404" msg="Error: " || $model || "/" || $id || " not found"/>
+			<http:response status="404" msg="Error: {$model}/{$id} not found"/>
 };
 
 declare function mdl:query($collection as xs:string, $query-string as xs:string, $directives as map) {
@@ -319,8 +319,10 @@ declare function mdl:query($collection as xs:string, $query-string as xs:string,
 	let $accept := $directives("accept")
 	let $model := $directives("model")
 	let $schemastore := $directives("schemastore")
+	let $rqlquery := rql:parse($query-string)
+	let $rqlxq := rql:to-xq($rqlquery)
 	return
-		if($query-string != "" or $range or sm:is-authenticated()) then
+		if($query-string != "" or $range or exists($rqlxq("limit")) or sm:is-authenticated()) then
 			let $schema := mdl:get-schema($schemastore, $model)
 			let $maxLimit :=
 				if($schema/maxCount) then
@@ -328,24 +330,30 @@ declare function mdl:query($collection as xs:string, $query-string as xs:string,
 				else
 					$mdl:maxLimit
 			let $items := collection($collection)/root
-			let $q := rql:parse($query-string,())
-			let $xq := rql:to-xq($q)
+			let $totalcount := count($items)
+			let $limit := 
+        		if($rqlxq("limit")) then
+        			$rqlxq("limit")
+        		else if($directives("range")) then
+        			rql:get-limit-from-range($directives("range"),$totalcount)
+        		else
+        			()
 			(: filter :)
-			let $items := rql:xq-filter($items,$xq("filter"),$xq("aggregate"))
+			let $items := rql:xq-filter($items,$rqlxq("filter"),$rqlxq("aggregate"))
 			return
-				if($xq("aggregate")) then
+				if($rqlxq("aggregate")) then
 					(: aggregate doesn't return sequence :)
 					$items
-				else if($items) then
+				else
 					let $limit := 
-						if($xq("limit")) then
-							$xq("limit")
+						if($rqlxq("limit")) then
+							$rqlxq("limit")
 						else if($range) then
 							rql:get-limit-from-range($range,$maxLimit)
 						else
 							()
 					(: sort, safe to pass through :)
-					let $items := rql:xq-sort($items,$sort)
+					let $items := rql:xq-sort($items,$rqlxq("sort"))
 					(: page, safe to pass through :)
 					let $items := rql:xq-limit($items, $limit)
 				return
@@ -353,13 +361,13 @@ declare function mdl:query($collection as xs:string, $query-string as xs:string,
 						(
 						<http:response status="200">
 							<http:header name="Accept-Ranges" value="items"/>
-							<http:header name="Content-Range" value="{rql:get-content-range-header($limit,count($items)}"/>
+							<http:header name="Content-Range" value="{rql:get-content-range-header($limit,$totalcount)}"/>
 						</http:response>,
 						<root xmlns:json="http://www.json.org">{
 						for $node in $items return
 							mdl:check-html(element {"json:value"} {
 								attribute {"json:array"} {"true"},
-								mdl:resolve-links(mdl:add-metadata($node,$store,$describe),$schema,$store,$schemastore)/node()
+								mdl:resolve-links(mdl:add-metadata($node,$collection,$describe),$schema,$collection,$schemastore)/node()
 							},$accept)
 						}</root>
 						)
@@ -367,16 +375,19 @@ declare function mdl:query($collection as xs:string, $query-string as xs:string,
 						element {"json:value"} {
 							attribute {"json:array"} {"true"}
 						}
+				
 		else
 			<http:response status="403" msg="Error: Guests are not allowed to query the entire collection"/>
 };
 
 declare function mdl:put($collection, $data, $directives) {
+    let $root := $directives("root-collection")
 	let $schemastore := $directives("schemastore")
 	let $model := $directives("model")
+	let $id := $directives("id")
 	let $schema := mdl:get-schema($schemastore, $model)
 	let $null := 
-	    if(xmldb:collection-available($store)) then
+	    if(xmldb:collection-available($collection)) then
 	        ()
 	    else
 	        xmldb:create-collection($root, $model)
@@ -416,21 +427,21 @@ declare function mdl:put($collection, $data, $directives) {
 			}
 	let $data := mdl:from-schema($data,$schema)
 	let $doc :=
-		if(exists(collection($store)/root[id = $id])) then
-			base-uri(collection($store)/root[id = $id])
+		if(exists(collection($collection)/root[id = $id])) then
+			base-uri(collection($collection)/root[id = $id])
 		else
 			$id || ".xml"
-	let $res := xmldb:store($store, $doc, $data)
+	let $res := xmldb:store($collection, $doc, $data)
 	return
 		if($res) then
-			mdl:resolve-links($data,$schema,$store,$schemastore)
+			mdl:resolve-links($data,$schema,$collection,$schemastore)
 		else
 			<http:response status="500" msg="Unkown Error occurred"/>
 };
 
 declare function mdl:delete($collection,$id,$directives) {
 	if($id) then
-		xmldb:remove($store, $id || ".xml")
+		xmldb:remove($collection, $id || ".xml")
 	else
 		<http:response status="500" msg="Unkown Error occurred"/>
 }; 
@@ -439,8 +450,15 @@ declare function mdl:request($dataroot as xs:string,$domain as xs:string,$model 
 	let $root := $dataroot || "/" || $domain || "/model/"
 	let $store :=  $root || $model
 	let $schemastore := $root || "Class"
-	(: use Class/[Model] as schema internally :)
-	let $schema := mdl:get-schema($schemastore, $model)
+	let $directives := map {
+	   "describe" := $describe,
+	   "accept" := $accept,
+	   "model" := $model,
+	   "range" := string(request:get-header("Range")),
+	   "schemastore" := $schemastore,
+	   "root-collection" := $root,
+	   "id" := $id
+	}
 	let $response :=
 		if($model eq "") then
 			<http:response status="500" msg="Unkown Error occurred"/>
@@ -458,31 +476,33 @@ declare function mdl:request($dataroot as xs:string,$domain as xs:string,$model 
 		else
 			<http:response status="503" msg="Unkown Error occurred"/>
 	let $output := 
-		if($result and $forcexml = false() and matches($accept,"application/[json|javascript]")) then
+		if($response and $forcexml = false() and matches($accept,"application/[json|javascript]")) then
 			util:declare-option("exist:serialize","method=json media-type=application/json")
 		else
 			util:declare-option("exist:serialize", "method=xml media-type=application/xml")
 	return
-		if(name($response[1]) = "http:response") then
+		(:if(name($response[1]) = "http:response") then
 			(: expect custom response :)
 			let $http-response := $response[1]
 			let $result := remove($response,1)
 			return
 				(: parse http:response entry :)
-				if($http-response/@status) then
-					response:set-status-code($http-response/@status)
-				else
-					(),
-				for $header in $http-response/http:header return 
-					response:set-header($header/@name,$header/@value),
-				if($result) then
-					$result
-				else
-					element response {
-						$http-response/@message/string(),
-						$http-response/message/string()
-					}
-		else
+				(
+				    if($http-response/@status) then
+    					response:set-status-code($http-response/@status)
+    				else
+    					(),
+    				for $header in $http-response/http:header return 
+    					response:set-header($header/@name,$header/@value),
+    				if($result) then
+    					$result
+    				else
+    					element response {
+    						$http-response/@message/string(),
+    						$http-response/message/string()
+    					}
+				)
+		else:)
 			$response
 };
 
