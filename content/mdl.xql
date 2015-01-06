@@ -371,6 +371,9 @@ declare function mdl:query($collection as xs:string, $query as map, $directives 
 };
 
 declare function mdl:put($collection, $data, $directives) {
+	let $schemastore := $directives("schemastore")
+	let $model := $directives("model")
+	let $schema := mdl:get-schema($schemastore, $model)
 	let $null := 
 	    if(xmldb:collection-available($store)) then
 	        ()
