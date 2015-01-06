@@ -84,7 +84,7 @@ declare function mdl:resolve-links($node as element(), $schema as element()?, $s
 							let $href := resolve-uri($uri,$store || "/")
 							let $lmodel := mdl:get-model-from-path($href)
 							let $lschema := doc($schemastore || "/" || $lmodel || ".xml")/root
-							let $data := rql:sequence(collection($href)/root,$q,500,false())
+							let $data := rql:sequence(collection($href)/root,$q,500)
 							return
 								if(count($data)) then
 									for $x in $data return
@@ -331,13 +331,6 @@ declare function mdl:query($collection as xs:string, $query-string as xs:string,
 					$mdl:maxLimit
 			let $items := collection($collection)/root
 			let $totalcount := count($items)
-			let $limit := 
-        		if($rqlxq("limit")) then
-        			$rqlxq("limit")
-        		else if($directives("range")) then
-        			rql:get-limit-from-range($directives("range"),$totalcount)
-        		else
-        			()
 			(: filter :)
 			let $items := rql:xq-filter($items,$rqlxq("filter"),$rqlxq("aggregate"))
 			return
@@ -481,7 +474,7 @@ declare function mdl:request($dataroot as xs:string,$domain as xs:string,$model 
 		else
 			util:declare-option("exist:serialize", "method=xml media-type=application/xml")
 	return
-		(:if(name($response[1]) = "http:response") then
+		if(name($response[1]) = "http:response") then
 			(: expect custom response :)
 			let $http-response := $response[1]
 			let $result := remove($response,1)
@@ -502,7 +495,7 @@ declare function mdl:request($dataroot as xs:string,$domain as xs:string,$model 
     						$http-response/message/string()
     					}
 				)
-		else:)
+		else
 			$response
 };
 
