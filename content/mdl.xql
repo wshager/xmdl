@@ -277,14 +277,20 @@ declare function mdl:request($dataroot as xs:string,$domain as xs:string,$model 
 };
 
 declare function mdl:request($dataroot as xs:string, $domain as xs:string,$model as xs:string,$id as xs:string,$query-string as xs:string,$method as xs:string,$accept as xs:string) {
+	let $content-type := string(request:get-header("Content-Type"))
 	let $data := 
 		if($method = ("PUT","POST")) then
 			let $data := request:get-data()
 			return
-				if($data) then
-					mdl:to-plain-xml(xqjson:parse-json(util:binary-to-string($data)))
+				if(matches($content-type,"application/[json|javascript]")) then
+					let $data := util:binary-to-string($data)
+					return
+						if($data) then
+							mdl:to-plain-xml(xqjson:parse-json($data))
+						else
+							<root/>
 				else
-					<root/>
+					$data
 		else
 			<root/>
 	return mdl:request($dataroot,$domain,$model,$id,$query-string,$method,$accept,$data)
@@ -310,7 +316,7 @@ declare function mdl:get($collection as xs:string, $id as xs:string, $directives
 		if($node) then
 			mdl:check-html(mdl:resolve-links(mdl:add-metadata($node,$collection,$describe),$schema,$collection,$schemastore),$accept)
 		else
-			<http:response status="404" msg="Error: {$model}/{$id} not found"/>
+			<http:response status="404" message="Error: {$model}/{$id} not found"/>
 };
 
 declare function mdl:query($collection as xs:string, $query-string as xs:string, $directives as map) {
@@ -370,20 +376,20 @@ declare function mdl:query($collection as xs:string, $query-string as xs:string,
 						}
 				
 		else
-			<http:response status="403" msg="Error: Guests are not allowed to query the entire collection"/>
+			<http:response status="403" message="Error: Guests are not allowed to query the entire collection"/>
 };
 
 declare function mdl:put($collection, $data, $directives) {
-    let $root := $directives("root-collection")
+	let $root := $directives("root-collection")
 	let $schemastore := $directives("schemastore")
 	let $model := $directives("model")
 	let $id := $directives("id")
 	let $schema := mdl:get-schema($schemastore, $model)
 	let $null := 
-	    if(xmldb:collection-available($collection)) then
-	        ()
-	    else
-	        xmldb:create-collection($root, $model)
+		if(xmldb:collection-available($collection)) then
+			()
+		else
+			xmldb:create-collection($root, $model)
 	let $data := mdl:remove-links($data,$schema)
 	let $did := $data/id/string()
 	(: check if id in data:
@@ -409,7 +415,7 @@ declare function mdl:put($collection, $data, $directives) {
 					util:uuid()
 	let $data := 
 		if($did) then
-		   $data
+			$data
 		else
 			element {"root"} {
 				$data/@*,
@@ -424,19 +430,30 @@ declare function mdl:put($collection, $data, $directives) {
 			base-uri(collection($collection)/root[id = $id])
 		else
 			$id || ".xml"
-	let $res := xmldb:store($collection, $doc, $data)
 	return
-		if($res) then
-			mdl:resolve-links($data,$schema,$collection,$schemastore)
+		if(sm:has-access(xs:anyURI($collection || "/" || $doc),"w")) then
+			try {
+				let $res := xmldb:store($collection, $doc, $data)
+				return
+					if($res) then
+						mdl:resolve-links($data,$schema,$collection,$schemastore)
+					else
+						<http:response status="500" message="Unkown Error occurred"/>
+			} catch * {
+				<http:response status="500" message="Error: {$err:code} {$err:description}"/>
+			}
 		else
-			<http:response status="500" msg="Unkown Error occurred"/>
+			<http:response status="403" message="Error: Permission denied"/>
 };
 
 declare function mdl:delete($collection,$id,$directives) {
 	if($id) then
-		xmldb:remove($collection, $id || ".xml")
+		if(sm:has-access(xs:anyURI($collection || "/" || $id || ".xml"),"w")) then
+			xmldb:remove($collection, $id || ".xml")
+		else
+			<http:response status="403" message="Error: Permission denied"/>
 	else
-		<http:response status="500" msg="Unkown Error occurred"/>
+		<http:response status="500" message="Unkown Error occurred"/>
 }; 
 
 declare function mdl:request($dataroot as xs:string,$domain as xs:string,$model as xs:string,$id as xs:string,$query-string as xs:string,$method as xs:string,$accept as xs:string,$data as node(),$forcexml as xs:boolean,$describe as xs:string) {
@@ -444,17 +461,17 @@ declare function mdl:request($dataroot as xs:string,$domain as xs:string,$model 
 	let $store :=  $root || $model
 	let $schemastore := $root || "Class"
 	let $directives := map {
-	   "describe" := $describe,
-	   "accept" := $accept,
-	   "model" := $model,
-	   "range" := string(request:get-header("Range")),
-	   "schemastore" := $schemastore,
-	   "root-collection" := $root,
-	   "id" := $id
+		"describe" := $describe,
+		"accept" := $accept,
+		"model" := $model,
+		"range" := string(request:get-header("Range")),
+		"schemastore" := $schemastore,
+		"root-collection" := $root,
+		"id" := $id
 	}
 	let $response :=
 		if($model eq "") then
-			<http:response status="500" msg="Unkown Error occurred"/>
+			<http:response status="500" message="Unkown Error occurred"/>
 		else if($method = ("PUT","POST")) then
 			mdl:put($store, $data, $directives)
 		else if($method="GET") then
@@ -467,7 +484,7 @@ declare function mdl:request($dataroot as xs:string,$domain as xs:string,$model 
 		else if($method="DELETE") then
 			mdl:delete($store,$id,$directives)
 		else
-			<http:response status="503" msg="Unkown Error occurred"/>
+			<http:response status="501" message="Method Not Implemented"/>
 	let $output := 
 		if($response and $forcexml = false() and matches($accept,"application/[json|javascript]")) then
 			util:declare-option("exist:serialize","method=json media-type=application/json")
@@ -481,19 +498,19 @@ declare function mdl:request($dataroot as xs:string,$domain as xs:string,$model 
 			return
 				(: parse http:response entry :)
 				(
-				    if($http-response/@status) then
-    					response:set-status-code($http-response/@status)
-    				else
-    					(),
-    				for $header in $http-response/http:header return 
-    					response:set-header($header/@name,$header/@value),
-    				if($result) then
-    					$result
-    				else
-    					element response {
-    						$http-response/@message/string(),
-    						$http-response/message/string()
-    					}
+					if($http-response/@status) then
+						response:set-status-code($http-response/@status)
+					else
+						(),
+					for $header in $http-response/http:header return 
+						response:set-header($header/@name,$header/@value),
+					if($result) then
+						$result
+					else
+						element response {
+							$http-response/@message/string(),
+							$http-response/message/string()
+						}
 				)
 		else
 			$response
@@ -512,7 +529,7 @@ declare %private function mdl:to-plain-xml($node as element()) as item()* {
 			$name
 	return
 		if($node[@type = "array"]) then
-		   for $item in $node/node() return
+			for $item in $node/node() return
 			element {$name} {
 				attribute {"json:array"} {"true"},
 				mdl:to-plain-xml($item)
@@ -525,7 +542,7 @@ declare %private function mdl:to-plain-xml($node as element()) as item()* {
 					(),
 				$node/string())
 			else
-			   for $item in $node/node() return
+				for $item in $node/node() return
 					mdl:to-plain-xml($item)
 		else
 			element {$name} {
