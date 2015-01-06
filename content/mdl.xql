@@ -66,12 +66,12 @@ declare function mdl:resolve-links($node as element(), $schema as element()?, $s
 			for $l in $schema/links return
 				let $href := tokenize($l/href,"\?")
 				let $uri := mdl:replace-vars(string($href[1]),$node)
-				let $qstr := mdl:replace-vars(string($href[2]),$node)
+				let $query-string := mdl:replace-vars(string($href[2]),$node)
 				return
 					if($l/resolution eq "lazy") then
 						let $href := 
-							if($qstr) then
-								$uri || "?" || $qstr
+							if($query-string) then
+								$uri || "?" || $query-string
 							else
 								$uri
 						return
@@ -79,7 +79,7 @@ declare function mdl:resolve-links($node as element(), $schema as element()?, $s
 								element { "_ref" } { $href }
 							}
 					else if($l/resolution eq "eager") then
-						let $q := rql:parse($qstr,())
+						let $q := rql:parse($query-string,())
 						return element { $l/rel } {
 							let $href := resolve-uri($uri,$store || "/")
 							let $lmodel := mdl:get-model-from-path($href)
@@ -268,30 +268,35 @@ declare function mdl:request($dataroot as xs:string,$domain as xs:string,$model 
 	mdl:request($dataroot,$domain,$model,$id,string(request:get-query-string()))
 };
 
-declare function mdl:request($dataroot as xs:string,$domain as xs:string,$model as xs:string,$id as xs:string,$qstr as xs:string) {
-	mdl:request($dataroot,$domain,$model,$id,$qstr,request:get-method())
+declare function mdl:request($dataroot as xs:string,$domain as xs:string,$model as xs:string,$id as xs:string,$query-string as xs:string) {
+	mdl:request($dataroot,$domain,$model,$id,$query-string,request:get-method())
 };
 
-declare function mdl:request($dataroot as xs:string,$domain as xs:string,$model as xs:string,$id as xs:string,$qstr as xs:string,$method as xs:string) {
-	mdl:request($dataroot,$domain,$model,$id,$qstr,$method,request:get-header("Accept"))
+declare function mdl:request($dataroot as xs:string,$domain as xs:string,$model as xs:string,$id as xs:string,$query-string as xs:string,$method as xs:string) {
+	mdl:request($dataroot,$domain,$model,$id,$query-string,$method,request:get-header("Accept"))
 };
 
-declare function mdl:request($dataroot as xs:string, $domain as xs:string,$model as xs:string,$id as xs:string,$qstr as xs:string,$method as xs:string,$accept as xs:string) {
+declare function mdl:request($dataroot as xs:string, $domain as xs:string,$model as xs:string,$id as xs:string,$query-string as xs:string,$method as xs:string,$accept as xs:string) {
 	let $data := 
 		if($method = ("PUT","POST")) then
-			util:binary-to-string(request:get-data())
+			let $data := request:get-data()
+			return
+				if($data) then
+					mdl:to-plain-xml(xqjson:parse-json(util:binary-to-string($data)))
+				else
+					<root/>
 		else
 			""
-	return mdl:request($dataroot,$domain,$model,$id,$qstr,$method,$accept,$data)
+	return mdl:request($dataroot,$domain,$model,$id,$query-string,$method,$accept,$data)
 };
 
-declare function mdl:request($dataroot as xs:string, $domain as xs:string,$model as xs:string,$id as xs:string,$qstr as xs:string,$method as xs:string,$accept as xs:string,$data as xs:string) {
-	mdl:request($dataroot,$domain,$model,$id,$qstr,$method,$accept,$data,false())
+declare function mdl:request($dataroot as xs:string, $domain as xs:string,$model as xs:string,$id as xs:string,$query-string as xs:string,$method as xs:string,$accept as xs:string,$data as xs:string) {
+	mdl:request($dataroot,$domain,$model,$id,$query-string,$method,$accept,$data,false())
 };
 
-declare function mdl:request($dataroot as xs:string, $domain as xs:string,$model as xs:string,$id as xs:string,$qstr as xs:string,$method as xs:string,$accept as xs:string,$data as xs:string,$forcexml as xs:boolean) {
+declare function mdl:request($dataroot as xs:string, $domain as xs:string,$model as xs:string,$id as xs:string,$query-string as xs:string,$method as xs:string,$accept as xs:string,$data as xs:string,$forcexml as xs:boolean) {
 	let $describe := string(request:get-header("describe"))
-	return mdl:request($dataroot,$domain,$model,$id,$qstr,$method,$accept,$data,$forcexml,$describe)
+	return mdl:request($dataroot,$domain,$model,$id,$query-string,$method,$accept,$data,$forcexml,$describe)
 };
 
 declare function mld:get($collection as xs:string, $id as xs:string, $directives as map) {
@@ -308,15 +313,14 @@ declare function mld:get($collection as xs:string, $id as xs:string, $directives
 			<http:response status="404" msg="Error: " || $model || "/" || $id || " not found"/>
 };
 
-declare function mdl:query($collection as xs:string, $query as map, $directives as map) {
-	let $qstr := $query("string")
+declare function mdl:query($collection as xs:string, $query-string as xs:string, $directives as map) {
 	let $range := $directives("range")
 	let $describe := $directives("describe")
 	let $accept := $directives("accept")
 	let $model := $directives("model")
 	let $schemastore := $directives("schemastore")
 	return
-		if($qstr != "" or $range or sm:is-authenticated()) then
+		if($query-string != "" or $range or sm:is-authenticated()) then
 			let $schema := mdl:get-schema($schemastore, $model)
 			let $maxLimit :=
 				if($schema/maxCount) then
@@ -324,7 +328,7 @@ declare function mdl:query($collection as xs:string, $query as map, $directives 
 				else
 					$mdl:maxLimit
 			let $items := collection($collection)/root
-			let $q := rql:parse($qstr,())
+			let $q := rql:parse($query-string,())
 			let $xq := rql:to-xq($q)
 			(: filter :)
 			let $items := rql:xq-filter($items,$xq("filter"),$xq("aggregate"))
@@ -376,10 +380,8 @@ declare function mdl:put($collection, $data, $directives) {
 	        ()
 	    else
 	        xmldb:create-collection($root, $model)
-	let $xml := xqjson:parse-json($data)
-	let $xml := mdl:to-plain-xml($xml)
-	let $xml := mdl:remove-links($xml,$schema)
-	let $did := $xml/id/string()
+	let $data := mdl:remove-links($data,$schema)
+	let $did := $data/id/string()
 	(: check if id in data:
 	this will take precedence, and actually move a resource 
 	from the original ID if that ID differs
@@ -401,27 +403,27 @@ declare function mdl:put($collection, $data, $directives) {
 					$next-id
 				else
 					util:uuid()
-	let $xml := 
+	let $data := 
 		if($did) then
-		   $xml
+		   $data
 		else
 			element {"root"} {
-				$xml/@*,
-				$xml/*[name(.) != "id"],
+				$data/@*,
+				$data/*[name(.) != "id"],
 				element id {
 					$id
 				}
 			}
-	let $xml := mdl:from-schema($xml,$schema)
+	let $data := mdl:from-schema($data,$schema)
 	let $doc :=
 		if(exists(collection($store)/root[id = $id])) then
 			base-uri(collection($store)/root[id = $id])
 		else
 			$id || ".xml"
-	let $res := xmldb:store($store, $doc, $xml)
+	let $res := xmldb:store($store, $doc, $data)
 	return
 		if($res) then
-			mdl:resolve-links($xml,$schema,$store,$schemastore)
+			mdl:resolve-links($data,$schema,$store,$schemastore)
 		else
 			<http:response status="500" msg="Unkown Error occurred"/>
 };
@@ -433,7 +435,7 @@ declare function mdl:delete($collection,$id,$directives) {
 		<http:response status="500" msg="Unkown Error occurred"/>
 }; 
 
-declare function mdl:request($dataroot as xs:string,$domain as xs:string,$model as xs:string,$id as xs:string,$qstr as xs:string,$method as xs:string,$accept as xs:string,$data as xs:string,$forcexml as xs:boolean,$describe as xs:string) {
+declare function mdl:request($dataroot as xs:string,$domain as xs:string,$model as xs:string,$id as xs:string,$query-string as xs:string,$method as xs:string,$accept as xs:string,$data as node(),$forcexml as xs:boolean,$describe as xs:string) {
 	let $root := $dataroot || "/" || $domain || "/model/"
 	let $store :=  $root || $model
 	let $schemastore := $root || "Class"
@@ -443,19 +445,14 @@ declare function mdl:request($dataroot as xs:string,$domain as xs:string,$model 
 		if($model eq "") then
 			<http:response status="500" msg="Unkown Error occurred"/>
 		else if($method = ("PUT","POST")) then
-			let $data := 
-				if($data != "") then
-					$data
-				else
-					"{}"
-			return mdl:put($root,$data,$directives)
+			mdl:put($store, $data, $directives)
 		else if($method="GET") then
 			(: if there no query AND an id we should always return the doc :)
 			if($id) then
 				mdl:get($store,$id,$directives)
 			(: if there is a query we should always return an array :)
 			else
-				mdl:query($root,map { "string" => $qstr }, $directives)
+				mdl:query($store, $query-string, $directives)
 		else if($method="DELETE") then
 			mdl:delete($store,$id,$directives)
 		else
@@ -487,4 +484,49 @@ declare function mdl:request($dataroot as xs:string,$domain as xs:string,$model 
 					}
 		else
 			$response
+};
+
+declare %private function mdl:to-plain-xml($node as element()) as item()* {
+	let $name := string(node-name($node))
+	let $name :=
+		if($name = "json") then
+			"root"
+		else if($name = "pair" and $node/@name) then
+			$node/@name
+		else if($name = "item") then
+			"json:value"
+		else
+			$name
+	return
+		if($node[@type = "array"]) then
+		   for $item in $node/node() return
+			element {$name} {
+				attribute {"json:array"} {"true"},
+				mdl:to-plain-xml($item)
+			}
+		else if($name="json:value") then
+			if(empty($node/*)) then
+				(if($node/@type = ("number","boolean")) then
+					attribute {"json:literal"} {"true"}
+				else
+					(),
+				$node/string())
+			else
+			   for $item in $node/node() return
+					mdl:to-plain-xml($item)
+		else
+			element {$name} {
+				if($node/@type = "array") then
+					attribute {"json:array"} {"true"}
+				else if($node/@type = ("number","boolean")) then
+					attribute {"json:literal"} {"true"}
+				else
+					(),
+				$node/@*[matches(name(.),"json:")],
+				for $child in $node/node() return
+					if($child instance of element()) then
+						mdl:to-plain-xml($child)
+					else
+						$child
+			}
 };
