@@ -476,7 +476,7 @@ declare function mdl:request($dataroot as xs:string,$domain as xs:string,$model 
 			mdl:put($store, $data, $directives)
 		else if($method="GET") then
 			(: if there no query AND an id we should always return the doc :)
-			if($id) then
+			if($query-string eq "" and $id ne "") then
 				mdl:get($store,$id,$directives)
 			(: if there is a query we should always return an array :)
 			else
