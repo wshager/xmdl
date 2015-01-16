@@ -13,7 +13,7 @@ declare namespace sm="http://exist-db.org/xquery/securitymanager";
 import module namespace json="http://www.json.org";
 import module namespace xmldb="http://exist-db.org/xquery/xmldb";
 import module namespace xqjson="http://xqilla.sourceforge.net/lib/xqjson";
-import module namespace rql="http://lagua.nl/lib/rql" at "rql.xql";
+import module namespace rql="http://lagua.nl/lib/rql";
 
 declare variable $mdl:maxLimit := 100;
 
