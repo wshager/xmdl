@@ -205,6 +205,7 @@ declare function mdl:remove-links($node as element(),$schema as element()?) {
 		$node
 };
 
+(:
 declare variable $mdl:describe := map {
 	"writable" := function($node, $uri) {
 		element _writable {
@@ -213,23 +214,38 @@ declare variable $mdl:describe := map {
 		}
 	}
 };
+:)
 
-declare function mdl:add-metadata($node as element(),$store as xs:string, $describe as xs:string) {
-	let $meta := tokenize($describe,"\s*,\s*")
-	let $uri := xs:anyURI($store || "/" || $node/id || ".xml")
-	return
-		if(doc-available($uri)) then
-			element { name($node) } {
+declare function mdl:writable($node) {
+	element _writable {
+		attribute json:literal { "true" },
+		sm:has-access(base-uri($node), "w")
+	}
+};
+
+declare function mdl:add-metadata($node as element(), $store as xs:string, $describe as xs:string) {
+	if($describe = "") then
+		$node
+	else
+		let $meta := tokenize($describe,"\s*,\s*")
+		let $uri := xs:anyURI($store || "/" || $node/id || ".xml")
+		return
+			if(doc-available($uri)) then
+				element { name($node) } {
 					$node/@*,
 					$node/*,
 					for $m in $meta return
-						if(map:contains($mdl:describe,$m)) then
+						(:if(map:contains($mdl:describe,$m)) then
 							map:get($mdl:describe,$m)($node,$uri)
+						else
+							():)
+						if($m eq "writable") then
+							mdl:writable($node)
 						else
 							()
 				}
-		else
-			$node
+			else
+				$node
 };
 
 declare function mdl:get-schema($schemastore as xs:string, $model as xs:string) {
@@ -307,10 +323,19 @@ declare function mdl:request($dataroot as xs:string, $domain as xs:string,$model
 
 declare function mdl:get($collection as xs:string, $id as xs:string, $directives as map) {
 	let $node := doc($collection || "/" || $id || ".xml")/root
-	let $describe := $directives("describe")
 	let $accept := $directives("accept")
 	let $model := $directives("model")
-	let $schemastore := $directives("schemastore")
+	(: properties below may not be available :)
+	let $describe := 
+		if(map:contains($directives,"describe")) then
+			$directives("describe")
+		else
+			""
+	let $schemastore := 
+		if(map:contains($directives,"schemastore")) then
+			$directives("schemastore")
+		else
+			$directives("root-collection") || "/Class"
 	let $schema := mdl:get-schema($schemastore, $model)
 	return
 		if($node) then
@@ -321,10 +346,19 @@ declare function mdl:get($collection as xs:string, $id as xs:string, $directives
 
 declare function mdl:query($collection as xs:string, $query-string as xs:string, $directives as map) {
 	let $range := $directives("range")
-	let $describe := $directives("describe")
 	let $accept := $directives("accept")
 	let $model := $directives("model")
-	let $schemastore := $directives("schemastore")
+	(: properties below may not be available :)
+	let $describe := 
+		if(map:contains($directives,"describe")) then
+			$directives("describe")
+		else
+			""
+	let $schemastore := 
+		if(map:contains($directives,"schemastore")) then
+			$directives("schemastore")
+		else
+			$directives("root-collection") || "/Class"
 	let $rqlquery := rql:parse($query-string)
 	let $rqlxq := rql:to-xq($rqlquery)
 	return
@@ -381,9 +415,14 @@ declare function mdl:query($collection as xs:string, $query-string as xs:string,
 
 declare function mdl:put($collection, $data, $directives) {
 	let $root := $directives("root-collection")
-	let $schemastore := $directives("schemastore")
 	let $model := $directives("model")
 	let $id := $directives("id")
+	(: properties below may not be available :)
+	let $schemastore := 
+		if(map:contains($directives,"schemastore")) then
+			$directives("schemastore")
+		else
+			$directives("root-collection") || "/Class"
 	let $schema := mdl:get-schema($schemastore, $model)
 	let $null := 
 		if(xmldb:collection-available($collection)) then
@@ -425,13 +464,14 @@ declare function mdl:put($collection, $data, $directives) {
 				}
 			}
 	let $data := mdl:from-schema($data,$schema)
-	let $doc :=
+	let $doc := $id || ".xml"
+	let $uri :=
 		if(exists(collection($collection)/root[id = $id])) then
 			base-uri(collection($collection)/root[id = $id])
 		else
-			$id || ".xml"
+			$collection || "/" || $doc
 	return
-		if(sm:has-access(xs:anyURI($collection || "/" || $doc),"w")) then
+		if(sm:has-access(xs:anyURI($uri),"w")) then
 			try {
 				let $res := xmldb:store($collection, $doc, $data)
 				return
@@ -447,11 +487,17 @@ declare function mdl:put($collection, $data, $directives) {
 };
 
 declare function mdl:delete($collection,$id,$directives) {
-	if($id) then
-		if(sm:has-access(xs:anyURI($collection || "/" || $id || ".xml"),"w")) then
-			xmldb:remove($collection, $id || ".xml")
-		else
-			<http:response status="403" message="Error: Permission denied"/>
+	if($id ne "") then
+		try {
+			(
+				<http:response status="200" />,
+				xmldb:remove($collection, $id || ".xml")
+			)
+		} catch java:org.xmldb.api.base.XMLDBException {
+			<http:response status="403" message="Error: permission denied"/>
+		} catch * {
+			<http:response status="404" message="Error: document not found"/>
+		}
 	else
 		<http:response status="500" message="Unkown Error occurred"/>
 }; 
@@ -491,32 +537,36 @@ declare function mdl:request($dataroot as xs:string,$domain as xs:string,$model 
 		else
 			util:declare-option("exist:serialize", "method=xml media-type=application/xml")
 	return
-		if(name($response[1]) = "http:response") then
-			(: expect custom response :)
-			let $http-response := $response[1]
-			let $result := remove($response,1)
-			return
-				(: parse http:response entry :)
-				(
-					if($http-response/@status) then
-						response:set-status-code($http-response/@status)
-					else
-						(),
-					for $header in $http-response/http:header return 
-						response:set-header($header/@name,$header/@value),
-					if($result) then
-						$result
-					else
-						element response {
-							$http-response/@message/string(),
-							$http-response/message/string()
-						}
-				)
-		else
-			$response
+		mdl:http-response($response)
 };
 
-declare %private function mdl:to-plain-xml($node as element()) as item()* {
+declare function mdl:http-response($response as node()*) {
+	if(name($response[1]) = "http:response") then
+		(: expect custom response :)
+		let $http-response := $response[1]
+		let $result := remove($response,1)
+		return
+			(: parse http:response entry :)
+			(
+				if($http-response/@status) then
+					response:set-status-code($http-response/@status)
+				else
+					(),
+				for $header in $http-response/http:header return 
+					response:set-header($header/@name,$header/@value),
+				if($result) then
+					$result
+				else
+					element response {
+						$http-response/@message/string(),
+						$http-response/message/string()
+					}
+			)
+	else
+		$response
+};
+
+declare function mdl:to-plain-xml($node as element()) as item()* {
 	let $name := string(node-name($node))
 	let $name :=
 		if($name = "json") then
