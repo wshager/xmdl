@@ -471,19 +471,18 @@ declare function mdl:put($collection, $data, $directives) {
 		else
 			$collection || "/" || $doc
 	return
-		if(sm:has-access(xs:anyURI($uri),"w")) then
-			try {
-				let $res := xmldb:store($collection, $doc, $data)
-				return
-					if($res) then
-						mdl:resolve-links($data,$schema,$collection,$schemastore)
-					else
-						<http:response status="500" message="Unkown Error occurred"/>
-			} catch * {
-				<http:response status="500" message="Error: {$err:code} {$err:description}"/>
-			}
-		else
-			<http:response status="403" message="Error: Permission denied"/>
+		try {
+			let $res := xmldb:store($collection, $doc, $data)
+			return
+				if($res) then
+					mdl:resolve-links($data,$schema,$collection,$schemastore)
+				else
+					<http:response status="500" message="Unkown Error occurred"/>
+		} catch java:org.xmldb.api.base.XMLDBException {
+			<http:response status="403" message="Error: permission denied"/>
+		} catch * {
+			<http:response status="500" message="Error: {$err:code} {$err:description}"/>
+		}
 };
 
 declare function mdl:delete($collection,$id,$directives) {
@@ -504,7 +503,7 @@ declare function mdl:delete($collection,$id,$directives) {
 
 declare function mdl:request($dataroot as xs:string,$domain as xs:string,$model as xs:string,$id as xs:string,$query-string as xs:string,$method as xs:string,$accept as xs:string,$data as node(),$forcexml as xs:boolean,$describe as xs:string) {
 	let $root := $dataroot || "/" || $domain || "/model/"
-	let $store :=  $root || $model
+	let $store := $root || $model
 	let $schemastore := $root || "Class"
 	let $directives := map {
 		"describe" := $describe,
