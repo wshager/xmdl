@@ -17,6 +17,188 @@ import module namespace rql="http://lagua.nl/lib/rql";
 
 declare variable $mdl:maxLimit := 100;
 
+
+declare function mdl:get($collection as xs:string, $id as xs:string, $directives as map) {
+	let $node := doc($collection || "/" || $id || ".xml")/root
+	let $accept := $directives("accept")
+	let $model := $directives("model")
+	(: properties below may not be available :)
+	let $describe := 
+		if(map:contains($directives,"describe")) then
+			$directives("describe")
+		else
+			""
+	let $schemastore := 
+		if(map:contains($directives,"schemastore")) then
+			$directives("schemastore")
+		else
+			$directives("root-collection") || "/Class"
+	let $schema := mdl:get-schema($schemastore, $model)
+	return
+		if($node) then
+			mdl:check-html(mdl:resolve-links(mdl:add-metadata($node,$collection,$describe),$schema,$collection,$schemastore),$accept)
+		else
+			<http:response status="404" message="Error: {$model}/{$id} not found"/>
+};
+
+declare function mdl:query($collection as xs:string, $query-string as xs:string, $directives as map) {
+	let $range := $directives("range")
+	let $accept := $directives("accept")
+	let $model := $directives("model")
+	(: properties below may not be available :)
+	let $describe := 
+		if(map:contains($directives,"describe")) then
+			$directives("describe")
+		else
+			""
+	let $schemastore := 
+		if(map:contains($directives,"schemastore")) then
+			$directives("schemastore")
+		else
+			$directives("root-collection") || "/Class"
+	let $rqlquery := rql:parse($query-string)
+	let $rqlxq := rql:to-xq($rqlquery)
+	return
+		if($query-string != "" or $range or exists($rqlxq("limit")) or sm:is-authenticated()) then
+			let $schema := mdl:get-schema($schemastore, $model)
+			let $maxLimit :=
+				if($schema/maxCount) then
+					number($schema/maxCount)
+				else
+					$mdl:maxLimit
+			let $items := collection($collection)/root
+			let $totalcount := count($items)
+			(: filter :)
+			let $items := rql:xq-filter($items,$rqlxq("filter"),$rqlxq("aggregate"))
+			return
+				if($rqlxq("aggregate")) then
+					(: aggregate doesn't return sequence :)
+					$items
+				else
+					let $limit := 
+						if($rqlxq("limit")) then
+							$rqlxq("limit")
+						else if($range) then
+							rql:get-limit-from-range($range,$maxLimit)
+						else
+							()
+					(: sort, safe to pass through :)
+					let $items := rql:xq-sort($items,$rqlxq("sort"))
+					(: page, safe to pass through :)
+					let $items := rql:xq-limit($items, $limit)
+				return
+					if($items) then
+						(
+						<http:response status="200">
+							<http:header name="Accept-Ranges" value="items"/>
+							<http:header name="Content-Range" value="{rql:get-content-range-header($limit,$totalcount)}"/>
+						</http:response>,
+						<root xmlns:json="http://www.json.org">{
+						for $node in $items return
+							mdl:check-html(element {"json:value"} {
+								attribute {"json:array"} {"true"},
+								mdl:resolve-links(mdl:add-metadata($node,$collection,$describe),$schema,$collection,$schemastore)/node()
+							},$accept)
+						}</root>
+						)
+					else
+						element {"json:value"} {
+							attribute {"json:array"} {"true"}
+						}
+				
+		else
+			<http:response status="403" message="Error: Guests are not allowed to query the entire collection"/>
+};
+
+declare function mdl:put($collection as xs:string, $data as node(), $directives as map) {
+	let $root := $directives("root-collection")
+	let $model := $directives("model")
+	let $id := $directives("id")
+	(: properties below may not be available :)
+	let $schemastore := 
+		if(map:contains($directives,"schemastore")) then
+			$directives("schemastore")
+		else
+			$directives("root-collection") || "/Class"
+	let $schema := mdl:get-schema($schemastore, $model)
+	let $null := 
+		if(xmldb:collection-available($collection)) then
+			()
+		else
+			xmldb:create-collection($root, $model)
+	let $data := mdl:remove-links($data,$schema)
+	let $did := $data/id/string()
+	(: check if id in data:
+	this will take precedence, and actually move a resource 
+	from the original ID if that ID differs
+	:)
+	let $oldId := 
+		if($did and $id and $did != $id) then
+			$id
+		else
+			""
+	let $id :=
+		if($did) then
+			$did
+		else if($id) then
+			$id
+		else
+			let $next-id := mdl:get-next-id($schema,$schemastore)
+			return
+				if($next-id) then
+					$next-id
+				else
+					util:uuid()
+	let $data := 
+		if($did) then
+			$data
+		else
+			element {"root"} {
+				$data/@*,
+				$data/*[name(.) != "id"],
+				element id {
+					$id
+				}
+			}
+	let $data := mdl:from-schema($data,$schema)
+	let $doc := $id || ".xml"
+	let $uri :=
+		if(exists(collection($collection)/root[id = $id])) then
+			base-uri(collection($collection)/root[id = $id])
+		else
+			$collection || "/" || $doc
+	return
+		try {
+			let $res := xmldb:store($collection, $doc, $data)
+			return
+				if($res) then
+					mdl:resolve-links($data,$schema,$collection,$schemastore)
+				else
+					<http:response status="500" message="Unkown Error occurred"/>
+		} catch java:org.xmldb.api.base.XMLDBException {
+			<http:response status="403" message="Error: permission denied"/>
+		} catch * {
+			<http:response status="500" message="Error: {$err:code} {$err:description}"/>
+		}
+};
+
+declare function mdl:delete($collection as xs:string, $id as xs:string, $directives as map) {
+	if($id ne "") then
+		try {
+			(
+				<http:response status="200" />,
+				xmldb:remove($collection, $id || ".xml")
+			)
+		} catch java:org.xmldb.api.base.XMLDBException {
+			<http:response status="403" message="Error: permission denied"/>
+		} catch * {
+			<http:response status="404" message="Error: document not found"/>
+		}
+	else
+		<http:response status="500" message="Unkown Error occurred"/>
+}; 
+
+(: public utilitiy functions :)
 declare function mdl:check-html($node,$accept) {
 	if(exists($node) and matches($accept,"application/[json|javascript]")) then
 		element { name($node) } {
@@ -29,33 +211,6 @@ declare function mdl:check-html($node,$accept) {
 		}
 	else
 		$node 
-};
-
-declare %private function mdl:replace-vars($str as xs:string, $node as element()) {
-	if($str) then
-		string-join(
-			for $x in analyze-string($str, "\{([^}]*)\}")/* return
-				if(local-name($x) eq "non-match") then
-					$x
-				else
-					for $g in $x/fn:group
-						return $node/*[local-name() eq $g]
-		)
-	else
-		""
-};
-
-declare %private function mdl:get-model-from-path($path) {
-	let $parts := tokenize($path,"/")
-	let $last := $parts[last()]
-	let $parts := remove($parts,count($parts))
-	return
-		if($last!="") then
-			$last
-		else if(count($parts)>0) then
-			mdl:get-model-from-path(string-join($parts,"/"))
-		else
-			()
 };
 
 declare function mdl:resolve-links($node as element(), $schema as element()?, $store as xs:string, $schemastore as xs:string) as element() {
@@ -248,6 +403,35 @@ declare function mdl:add-metadata($node as element(), $store as xs:string, $desc
 				$node
 };
 
+(: private functions :)
+declare %private function mdl:replace-vars($str as xs:string, $node as element()) {
+	if($str) then
+		string-join(
+			for $x in analyze-string($str, "\{([^}]*)\}")/* return
+				if(local-name($x) eq "non-match") then
+					$x
+				else
+					for $g in $x/fn:group
+						return $node/*[local-name() eq $g]
+		)
+	else
+		""
+};
+
+declare %private function mdl:get-model-from-path($path) {
+	let $parts := tokenize($path,"/")
+	let $last := $parts[last()]
+	let $parts := remove($parts,count($parts))
+	return
+		if($last!="") then
+			$last
+		else if(count($parts)>0) then
+			mdl:get-model-from-path(string-join($parts,"/"))
+		else
+			()
+};
+
+(: deprecated, to be removed in 0.3 :)
 declare function mdl:get-schema($schemastore as xs:string, $model as xs:string) {
 	let $schemaname := $model || ".xml"
 	let $schemadoc := $schemastore || "/" || $schemaname
@@ -320,186 +504,6 @@ declare function mdl:request($dataroot as xs:string, $domain as xs:string,$model
 	let $describe := string(request:get-header("describe"))
 	return mdl:request($dataroot,$domain,$model,$id,$query-string,$method,$accept,$data,$forcexml,$describe)
 };
-
-declare function mdl:get($collection as xs:string, $id as xs:string, $directives as map) {
-	let $node := doc($collection || "/" || $id || ".xml")/root
-	let $accept := $directives("accept")
-	let $model := $directives("model")
-	(: properties below may not be available :)
-	let $describe := 
-		if(map:contains($directives,"describe")) then
-			$directives("describe")
-		else
-			""
-	let $schemastore := 
-		if(map:contains($directives,"schemastore")) then
-			$directives("schemastore")
-		else
-			$directives("root-collection") || "/Class"
-	let $schema := mdl:get-schema($schemastore, $model)
-	return
-		if($node) then
-			mdl:check-html(mdl:resolve-links(mdl:add-metadata($node,$collection,$describe),$schema,$collection,$schemastore),$accept)
-		else
-			<http:response status="404" message="Error: {$model}/{$id} not found"/>
-};
-
-declare function mdl:query($collection as xs:string, $query-string as xs:string, $directives as map) {
-	let $range := $directives("range")
-	let $accept := $directives("accept")
-	let $model := $directives("model")
-	(: properties below may not be available :)
-	let $describe := 
-		if(map:contains($directives,"describe")) then
-			$directives("describe")
-		else
-			""
-	let $schemastore := 
-		if(map:contains($directives,"schemastore")) then
-			$directives("schemastore")
-		else
-			$directives("root-collection") || "/Class"
-	let $rqlquery := rql:parse($query-string)
-	let $rqlxq := rql:to-xq($rqlquery)
-	return
-		if($query-string != "" or $range or exists($rqlxq("limit")) or sm:is-authenticated()) then
-			let $schema := mdl:get-schema($schemastore, $model)
-			let $maxLimit :=
-				if($schema/maxCount) then
-					number($schema/maxCount)
-				else
-					$mdl:maxLimit
-			let $items := collection($collection)/root
-			let $totalcount := count($items)
-			(: filter :)
-			let $items := rql:xq-filter($items,$rqlxq("filter"),$rqlxq("aggregate"))
-			return
-				if($rqlxq("aggregate")) then
-					(: aggregate doesn't return sequence :)
-					$items
-				else
-					let $limit := 
-						if($rqlxq("limit")) then
-							$rqlxq("limit")
-						else if($range) then
-							rql:get-limit-from-range($range,$maxLimit)
-						else
-							()
-					(: sort, safe to pass through :)
-					let $items := rql:xq-sort($items,$rqlxq("sort"))
-					(: page, safe to pass through :)
-					let $items := rql:xq-limit($items, $limit)
-				return
-					if($items) then
-						(
-						<http:response status="200">
-							<http:header name="Accept-Ranges" value="items"/>
-							<http:header name="Content-Range" value="{rql:get-content-range-header($limit,$totalcount)}"/>
-						</http:response>,
-						<root xmlns:json="http://www.json.org">{
-						for $node in $items return
-							mdl:check-html(element {"json:value"} {
-								attribute {"json:array"} {"true"},
-								mdl:resolve-links(mdl:add-metadata($node,$collection,$describe),$schema,$collection,$schemastore)/node()
-							},$accept)
-						}</root>
-						)
-					else
-						element {"json:value"} {
-							attribute {"json:array"} {"true"}
-						}
-				
-		else
-			<http:response status="403" message="Error: Guests are not allowed to query the entire collection"/>
-};
-
-declare function mdl:put($collection, $data, $directives) {
-	let $root := $directives("root-collection")
-	let $model := $directives("model")
-	let $id := $directives("id")
-	(: properties below may not be available :)
-	let $schemastore := 
-		if(map:contains($directives,"schemastore")) then
-			$directives("schemastore")
-		else
-			$directives("root-collection") || "/Class"
-	let $schema := mdl:get-schema($schemastore, $model)
-	let $null := 
-		if(xmldb:collection-available($collection)) then
-			()
-		else
-			xmldb:create-collection($root, $model)
-	let $data := mdl:remove-links($data,$schema)
-	let $did := $data/id/string()
-	(: check if id in data:
-	this will take precedence, and actually move a resource 
-	from the original ID if that ID differs
-	:)
-	let $oldId := 
-		if($did and $id and $did != $id) then
-			$id
-		else
-			""
-	let $id :=
-		if($did) then
-			$did
-		else if($id) then
-			$id
-		else
-			let $next-id := mdl:get-next-id($schema,$schemastore)
-			return
-				if($next-id) then
-					$next-id
-				else
-					util:uuid()
-	let $data := 
-		if($did) then
-			$data
-		else
-			element {"root"} {
-				$data/@*,
-				$data/*[name(.) != "id"],
-				element id {
-					$id
-				}
-			}
-	let $data := mdl:from-schema($data,$schema)
-	let $doc := $id || ".xml"
-	let $uri :=
-		if(exists(collection($collection)/root[id = $id])) then
-			base-uri(collection($collection)/root[id = $id])
-		else
-			$collection || "/" || $doc
-	return
-		try {
-			let $res := xmldb:store($collection, $doc, $data)
-			return
-				if($res) then
-					mdl:resolve-links($data,$schema,$collection,$schemastore)
-				else
-					<http:response status="500" message="Unkown Error occurred"/>
-		} catch java:org.xmldb.api.base.XMLDBException {
-			<http:response status="403" message="Error: permission denied"/>
-		} catch * {
-			<http:response status="500" message="Error: {$err:code} {$err:description}"/>
-		}
-};
-
-declare function mdl:delete($collection,$id,$directives) {
-	if($id ne "") then
-		try {
-			(
-				<http:response status="200" />,
-				xmldb:remove($collection, $id || ".xml")
-			)
-		} catch java:org.xmldb.api.base.XMLDBException {
-			<http:response status="403" message="Error: permission denied"/>
-		} catch * {
-			<http:response status="404" message="Error: document not found"/>
-		}
-	else
-		<http:response status="500" message="Unkown Error occurred"/>
-}; 
 
 declare function mdl:request($dataroot as xs:string,$domain as xs:string,$model as xs:string,$id as xs:string,$query-string as xs:string,$method as xs:string,$accept as xs:string,$data as node(),$forcexml as xs:boolean,$describe as xs:string) {
 	let $root := $dataroot || "/" || $domain || "/model/"
