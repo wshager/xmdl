@@ -18,7 +18,7 @@ import module namespace rql="http://lagua.nl/lib/rql";
 declare variable $mdl:maxLimit := 100;
 
 
-declare function mdl:get($collection as xs:string, $id as xs:string, $directives as map) {
+declare function mdl:get($collection as xs:string, $id as xs:string, $directives as item()*) {
 	let $node := doc($collection || "/" || $id || ".xml")/root
 	let $accept := $directives("accept")
 	let $model := $directives("model")
@@ -41,7 +41,7 @@ declare function mdl:get($collection as xs:string, $id as xs:string, $directives
 			<http:response status="404" message="Error: {$model}/{$id} not found"/>
 };
 
-declare function mdl:query($collection as xs:string, $query-string as xs:string, $directives as map) {
+declare function mdl:query($collection as xs:string, $query-string as xs:string, $directives as item()*) {
 	let $range := $directives("range")
 	let $accept := $directives("accept")
 	let $model := $directives("model")
@@ -110,7 +110,7 @@ declare function mdl:query($collection as xs:string, $query-string as xs:string,
 			<http:response status="403" message="Error: Guests are not allowed to query the entire collection"/>
 };
 
-declare function mdl:put($collection as xs:string, $data as node(), $directives as map) {
+declare function mdl:put($collection as xs:string, $data as node(), $directives as item()*) {
 	let $root := $directives("root-collection")
 	let $model := $directives("model")
 	let $id := $directives("id")
@@ -182,7 +182,7 @@ declare function mdl:put($collection as xs:string, $data as node(), $directives 
 		}
 };
 
-declare function mdl:delete($collection as xs:string, $id as xs:string, $directives as map) {
+declare function mdl:delete($collection as xs:string, $id as xs:string, $directives as item()*) {
 	if($id ne "") then
 		try {
 			(
