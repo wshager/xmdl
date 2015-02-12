@@ -275,7 +275,7 @@ declare function mdl:from-schema($node as element()*, $schema as element()?) {
 								()
 							else
 								attribute { "json:literal"} { "true" },
-							if($p/type eq "string" and $p/format eq "date-time" and $p/default eq "now()") then
+							if($p/type eq "string" and $p/format = ("date","time","date-time") and $p/default eq "now()") then
 								current-dateTime()
 							else if($p/type = ("array","object")) then
 								$p/default/*
