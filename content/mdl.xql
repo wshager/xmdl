@@ -67,9 +67,9 @@ declare function mdl:query($collection as xs:string, $query-string as xs:string,
 				else
 					$mdl:maxLimit
 			let $items := collection($collection)/root
-			let $totalcount := count($items)
 			(: filter :)
 			let $items := rql:xq-filter($items,$rqlxq("filter"),$rqlxq("aggregate"))
+			let $totalcount := count($items)
 			return
 				if($rqlxq("aggregate")) then
 					(: aggregate doesn't return sequence :)
