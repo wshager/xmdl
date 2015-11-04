@@ -9,6 +9,7 @@ module namespace mdl="http://lagua.nl/lib/mdl";
 declare namespace request="http://exist-db.org/xquery/request";
 declare namespace response="http://exist-db.org/xquery/response";
 declare namespace sm="http://exist-db.org/xquery/securitymanager";
+declare namespace http="http://expath.org/ns/http-client";
 
 import module namespace json="http://www.json.org";
 import module namespace xmldb="http://exist-db.org/xquery/xmldb";
@@ -346,7 +347,7 @@ declare function mdl:get-next-id($schema as element()?,$schemastore as xs:string
 
 declare function mdl:remove-links($node as element(),$schema as element()?) {
 	if($schema) then
-		let $links := for $l in $schema/links return string($l/rel)
+		let $links := for $l in $schema/links[resolution = ("eager","lazy")] return string($l/rel)
 		return
 			element { name($node) } {
 				$node/@*,
